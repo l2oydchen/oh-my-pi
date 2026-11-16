@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added an optional usage flag for plan or credit usage that has no known dollar amount.
+
 ## [18.18.6] - 2026-11-09
 
 ### Added

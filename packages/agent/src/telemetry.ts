@@ -197,6 +197,7 @@ export interface ChatUsageSnapshot {
 	readonly inputTokens: number;
 	readonly outputTokens: number;
 	readonly totalTokens: number;
+	readonly hasUnpricedUsage?: boolean;
 	readonly cachedInputTokens: number | undefined;
 	readonly cacheWriteTokens: number | undefined;
 	readonly reasoningOutputTokens: number | undefined;
@@ -1478,6 +1479,7 @@ function applyCostEstimateForUsage(
 
 function buildUsageSnapshot(usage: Usage): ChatUsageSnapshot {
 	return {
+		...(usage.hasUnpricedUsage ? { hasUnpricedUsage: true } : undefined),
 		inputTokens: (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0),
 		outputTokens: usage.output ?? 0,
 		totalTokens:

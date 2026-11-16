@@ -1314,6 +1314,35 @@ export function getInstallId(): string {
 	return next;
 }
 
+/** Require an identity read back from disk; OAuth registrations must never use an ephemeral fallback. */
+export function getPersistentInstallId(): string {
+	const filePath = path.join(getBaseConfigRoot(), INSTALL_ID_FILE);
+	try {
+		const existing = fs.readFileSync(filePath, "utf8").trim();
+		if (!UUID_RE.test(existing)) throw new Error("The persisted install ID is invalid");
+		cachedInstallId = existing;
+		return existing;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+	fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+	try {
+		const fd = fs.openSync(filePath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
+		try {
+			fs.writeFileSync(fd, `${crypto.randomUUID()}\n`);
+			fs.fsyncSync(fd);
+		} finally {
+			fs.closeSync(fd);
+		}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+	}
+	const persisted = fs.readFileSync(filePath, "utf8").trim();
+	if (!UUID_RE.test(persisted)) throw new Error("A persistent install ID could not be established");
+	cachedInstallId = persisted;
+	return persisted;
+}
+
 /** Test-only: clear cached install id. Never call from production code. */
 export function __resetInstallIdCacheForTests(): void {
 	cachedInstallId = null;

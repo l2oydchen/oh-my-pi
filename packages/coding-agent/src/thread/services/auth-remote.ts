@@ -52,6 +52,8 @@ import type {
 	OAuthCredential,
 	OAuthLoginController,
 	OAuthLoginIdentity,
+	OAuthLoginOptions,
+	OAuthRegistrationSummary,
 	OAuthProviderId,
 	OAuthRefreshByIdOptions,
 	ObservedUsageInput,
@@ -361,10 +363,24 @@ class RemoteOAuth implements OAuthApi {
 		this.#availability = availability;
 	}
 
-	async login(provider: OAuthProviderId, ctrl: OAuthLoginController): Promise<OAuthLoginIdentity | undefined> {
+	async login(
+		provider: OAuthProviderId,
+		ctrl: OAuthLoginController,
+		options?: OAuthLoginOptions,
+	): Promise<OAuthLoginIdentity | undefined> {
 		// A fetch override answers with `Response` objects, which cannot cross threads.
 		if (ctrl.fetch) throw new Error("OAuth login with a custom fetch must run on the main thread");
-		return this.#remote.call("oauth.login", provider, ctrl);
+		return this.#remote.call("oauth.login", provider, ctrl, options);
+	}
+	registrations(provider: string): OAuthRegistrationSummary[] {
+		return this.#remote.callSync("oauth.registrations", provider);
+	}
+	logoutRegistration(
+		provider: string,
+		registrationId: string,
+		signal?: AbortSignal,
+	): Promise<{ remoteRevoked: boolean }> {
+		return this.#remote.call("oauth.logoutRegistration", provider, registrationId, signal);
 	}
 	access(provider: string, sessionId?: string, options?: AuthApiKeyOptions): Promise<OAuthAccess | undefined> {
 		return this.#remote.call("oauth.access", provider, sessionId, options);

@@ -1,4 +1,4 @@
-import type { OAuthCredentials } from "../registry/oauth/types";
+import type { OAuthCredentials, OAuthRegistrationLoginResult, OAuthTokenResponse } from "../registry/oauth/types";
 import type { Provider } from "../types";
 import type {
 	ClientUsageIdentity,
@@ -14,6 +14,7 @@ import type {
 	DisabledCredentialSummary,
 	OAuthCredential,
 	OAuthRefreshReason,
+	OAuthRegistrationSummary,
 	StoredAuthCredential,
 	StoredCredentialBlock,
 } from "./types";
@@ -140,6 +141,25 @@ export interface CredentialRefreshLeaseHolder {
 	expiresAtMs: number;
 }
 
+/** Local registration state. Identity-only grants use real optional tokens, never empty OAuth credentials. */
+export interface StoredOAuthRegistration extends OAuthRegistrationSummary {
+	hostId: string;
+	generation: number;
+	identity?: OAuthTokenResponse & { authorizationNonce?: string };
+}
+
+/** Supported only by local stores; remote broker stores must not implement this concern. */
+export interface OAuthRegistrationStore {
+	/** Includes expired holders so logout does not steal from a stalled token exchange. */
+	getCredentialRefreshLeaseHolder(credentialId: number): CredentialRefreshLeaseHolder | undefined;
+	listOAuthRegistrations(provider?: string): StoredOAuthRegistration[];
+	getOAuthRegistrationCredential(provider: string, registrationId: string): StoredAuthCredential | undefined;
+	saveOAuthRegistrationLogin(provider: string, result: OAuthRegistrationLoginResult): void;
+	beginOAuthRegistrationLogout(provider: string, registrationId: string): StoredOAuthRegistration | undefined;
+	finishOAuthRegistrationLogout(provider: string, registrationId: string, generation: number): void;
+	disableOAuthRegistrationPlan(credentialId: number, expectedData: string, tokens: OAuthTokenResponse, lease: CredentialRefreshLeaseFence): boolean;
+}
+
 /** Usage history and client-observed request accounting. */
 export interface UsageLedgerStore {
 	/**
@@ -250,8 +270,17 @@ export interface AuthCredentialStore
 		CredentialCacheStore,
 		Partial<CredentialBlockStore>,
 		Partial<CredentialRefreshLeaseStore>,
+		Partial<OAuthRegistrationStore>,
 		Partial<UsageLedgerStore>,
 		Partial<CredentialUpstream> {}
+
+export function hasOAuthRegistrations(store: AuthCredentialStore): store is AuthCredentialStore & OAuthRegistrationStore {
+	return typeof store.listOAuthRegistrations === "function" && typeof store.saveOAuthRegistrationLogin === "function" &&
+		typeof store.getCredentialRefreshLeaseHolder === "function" &&
+		typeof store.getOAuthRegistrationCredential === "function" &&
+		typeof store.beginOAuthRegistrationLogout === "function" && typeof store.finishOAuthRegistrationLogout === "function" &&
+		typeof store.disableOAuthRegistrationPlan === "function";
+}
 
 /** Narrow stores that implement the complete durable refresh-lease concern. */
 export function hasRefreshLeases(

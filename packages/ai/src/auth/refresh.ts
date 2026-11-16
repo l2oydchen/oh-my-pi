@@ -2,7 +2,8 @@ import { scheduler } from "node:timers/promises";
 import { isSqliteBusyError, logger, postmortem } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import { getOAuthProvider, normalizeOAuthCredentialExpiry, refreshOAuthToken } from "../registry/oauth";
-import type { OAuthCredentials, OAuthProvider } from "../registry/oauth/types";
+import { ChatGPTPlanAccessDisabled, ChatGPTTokenError } from "../registry/oauth/openai-chatgpt";
+import type { OAuthCredentials, OAuthProvider, OAuthRefreshContext } from "../registry/oauth/types";
 import type { Provider } from "../types";
 import { raceSignal } from "./abort";
 import { authCredentialEquals, type CredentialPool, credentialDisabledEvent } from "./pool";
@@ -12,6 +13,7 @@ import {
 	type CredentialRefreshLeaseHolder,
 	type CredentialRefreshLeaseStore,
 	hasRefreshLeases,
+	hasOAuthRegistrations,
 } from "./store";
 import {
 	REMOTE_REFRESH_SENTINEL,
@@ -38,6 +40,13 @@ import {
  * the rotation cadence by <4%.
  */
 export const OAUTH_REFRESH_SKEW_MS = 60_000;
+
+/** A provider's earliest-refresh boundary may temporarily override our proactive skew, never its real expiry. */
+export function isOAuthCredentialFresh(credential: OAuthCredentials, skewMs = OAUTH_REFRESH_SKEW_MS): boolean {
+	const now = Date.now();
+	return !credential.pendingRotation && now < credential.expires &&
+		(now + skewMs < credential.expires || (credential.earliestRefreshAt !== undefined && now < credential.earliestRefreshAt));
+}
 /**
  * How long auth recovery may reuse a token minted moments ago — by this
  * refresher or, through the shared store, by another process.
@@ -130,6 +139,12 @@ export function mergeRefreshedCredential<T extends OAuthCredential>(current: T, 
 		apiEndpoint: refreshed.apiEndpoint ?? current.apiEndpoint,
 		...mergeRefreshedOrganizationScope(current, refreshed),
 		authorizedAt: refreshed.authorizedAt ?? current.authorizedAt,
+		...(current.authMode === "chatgpt-siwc" ? {
+			scopes: refreshed.scopes,
+			idToken: refreshed.idToken ?? current.idToken,
+			earliestRefreshAt: refreshed.earliestRefreshAt,
+			pendingRotation: undefined,
+		} : {}),
 	};
 }
 
@@ -454,7 +469,7 @@ export class OAuthRefresher {
 			if (!current) {
 				return { credential: undefined, refreshed: false, removed: false };
 			}
-			const currentIsFresh = Date.now() + refreshSkewMs < current.expires;
+			const currentIsFresh = isOAuthCredentialFresh(current, refreshSkewMs);
 			// A peer rotated the credential out from under the caller's observation.
 			// Adopt the stored copy only when it is still usable; a stored copy that
 			// is itself expired must fall through to a refresh rather than be handed
@@ -537,7 +552,7 @@ export class OAuthRefresher {
 			if (!current) {
 				return { credential: undefined, refreshed: false, removed: false };
 			}
-			const currentIsFresh = Date.now() + refreshSkewMs < current.expires;
+			const currentIsFresh = isOAuthCredentialFresh(current, refreshSkewMs);
 			// Re-check after acquiring the lease: a peer that held it may have just
 			// rotated the row, mirroring the pre-lease guard.
 			if (currentIsFresh && this.#storedIsNewer(current, options)) {
@@ -621,7 +636,7 @@ export class OAuthRefresher {
 			typeof options.keepCredentialOnRefreshFailure === "function"
 				? options.keepCredentialOnRefreshFailure(error)
 				: options.keepCredentialOnRefreshFailure === true;
-		if (keepCredential) {
+		if (keepCredential && current.authMode !== "chatgpt-siwc") {
 			return { credential: current, refreshed: false, removed: false };
 		}
 		throw error;
@@ -710,8 +725,29 @@ export class OAuthRefresher {
 
 			let refreshed: OAuthCredentials;
 			try {
-				refreshed = await Promise.race([options.refresh(current, refreshAbort.signal), backstopReached.promise]);
+				const refreshContext: OAuthRefreshContext | undefined = current.authMode === "chatgpt-siwc" ? {
+					checkpoint: async response => {
+						if (!leaseStore || leasedCredentialId === undefined) throw new AIError.ConfigurationError("ChatGPT refresh requires a durable local lease");
+						const checkpoint: T = { ...current, expires: 0, pendingRotation: response };
+						const serialized = serializeCredential(provider, checkpoint);
+						if (!serialized || !(await this.#persistExchangedCredential(provider, row.id, serializedData, checkpoint,
+							{ store: leaseStore, owner }, { provider, credentialId: row.id, phase: "checkpoint" }))) {
+							throw new AIError.ConfigurationError("ChatGPT refresh could not checkpoint its rotated token");
+						}
+						// Finalization must compare against the new bytes, not its own superseded pre-exchange snapshot.
+						serializedData = serialized.data;
+						this.#recentMints.delete(row.id);
+						await this.#deps.pool.reload();
+					},
+				} : undefined;
+				refreshed = await Promise.race([options.refresh(current, refreshAbort.signal, refreshContext), backstopReached.promise]);
 			} catch (error) {
+				if (error instanceof ChatGPTPlanAccessDisabled && hasOAuthRegistrations(this.#deps.store) && leasedCredentialId !== undefined) {
+					const removed = this.#deps.store.disableOAuthRegistrationPlan(row.id, serializedData, error.tokens, { owner, nowMs: Date.now() });
+					await this.#deps.pool.reload();
+					if (removed) return { result: { credential: undefined, refreshed: false, removed: true } };
+					return { failure: error };
+				}
 				if (!options.isDefinitiveFailure?.(error)) return { failure: error };
 				if (takenOverFrom && leaseStore && leasedCredentialId !== undefined) {
 					// The owner whose lease lapsed may have spent this token and still be
@@ -953,7 +989,7 @@ export class OAuthRefresher {
 				return this.#refreshSingleFlight(provider, credential, credentialId, signal, reason, rejectedAccess);
 			}
 		}
-		if (Date.now() + OAUTH_REFRESH_SKEW_MS < credential.expires) return credential;
+		if (isOAuthCredentialFresh(credential)) return credential;
 		// A caller that already left must not own a refresh that later callers join:
 		// they would inherit its cancellation instead of a credential.
 		if (signal?.aborted) throw new AIError.AbortError("credential refresh aborted");
@@ -1004,11 +1040,11 @@ export class OAuthRefresher {
 				rejectedAccess: reason === "auth-recovery" ? rejectedAccess : undefined,
 				signal,
 				// `refreshStored` owns the caller budget and the exchange backstop.
-				refresh: (current, refreshSignal) =>
-					this.#requestOAuthCredentialRefresh(provider, current, credentialId, refreshSignal, reason, undefined),
+				refresh: (current, refreshSignal, context) =>
+					this.#requestOAuthCredentialRefresh(provider, current, credentialId, refreshSignal, reason, undefined, context),
 				// A usage probe is advisory: leave a dead grant for an interactive request to disable.
 				isDefinitiveFailure:
-					reason === "usage-probe" ? undefined : error => AIError.isDefinitiveOAuthFailure(String(error)),
+					reason === "usage-probe" ? undefined : error => error instanceof ChatGPTTokenError ? error.requiresReauthentication : AIError.isDefinitiveOAuthFailure(String(error)),
 				disabledCause: error => `oauth refresh failed: ${String(error)}`,
 			});
 			if (result.credential) {
@@ -1018,7 +1054,7 @@ export class OAuthRefresher {
 					// are legitimately short-lived); the next resolve simply treats it as
 					// due for refresh again instead of rejecting a token we just minted.
 					if (Date.now() < result.credential.expires) return result.credential;
-				} else if (Date.now() + OAUTH_REFRESH_SKEW_MS < result.credential.expires) {
+				} else if (isOAuthCredentialFresh(result.credential)) {
 					// Reloaded (not refreshed by us) credential — match refresh's
 					// freshness contract: a reload within the refresh skew still counts as
 					// needing refresh, so returning it here would make the final candidate pass
@@ -1055,6 +1091,7 @@ export class OAuthRefresher {
 		signal: AbortSignal | undefined,
 		reason: OAuthRefreshReason | undefined,
 		timeoutMs: number | undefined,
+		context?: OAuthRefreshContext,
 	): Promise<OAuthCredentials> {
 		let refreshPromise: Promise<OAuthCredentials>;
 		// Caller override > store-level hook > local per-provider refresh.
@@ -1062,7 +1099,7 @@ export class OAuthRefresher {
 		// routes refresh through the broker without explicit wiring.
 		const storeRefresh = this.#deps.store.refreshOAuthCredential?.bind(this.#deps.store);
 		const overrideRefresh = this.#deps.override ?? storeRefresh;
-		if (overrideRefresh && credentialId !== undefined) {
+		if (overrideRefresh && credentialId !== undefined && credential.authMode !== "chatgpt-siwc") {
 			refreshPromise = overrideRefresh(provider, credentialId, credential, signal, reason);
 		} else {
 			const customProvider = getOAuthProvider(provider);
@@ -1073,9 +1110,9 @@ export class OAuthRefresher {
 						provider,
 					});
 				}
-				refreshPromise = customProvider.refreshToken(credential, signal);
+				refreshPromise = customProvider.refreshToken(credential, signal, context);
 			} else {
-				refreshPromise = refreshOAuthToken(provider as OAuthProvider, credential, signal);
+				refreshPromise = refreshOAuthToken(provider as OAuthProvider, credential, signal, context);
 			}
 		}
 		// Stop awaiting after `timeoutMs` or on `signal`. Leased exchanges pass no
@@ -1235,7 +1272,8 @@ function snapshotEntry(id: number, provider: string, credential: OAuthCredential
 	return {
 		id,
 		provider,
-		credential: { ...credential, refresh: REMOTE_REFRESH_SENTINEL },
+		credential: { ...credential, refresh: REMOTE_REFRESH_SENTINEL,
+			...(credential.authMode === "chatgpt-siwc" ? { idToken: undefined, authorizationNonce: undefined, pendingRotation: undefined } : {}) },
 		identityKey: resolveCredentialIdentityKey(provider, credential),
 	};
 }

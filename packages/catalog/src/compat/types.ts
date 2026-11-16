@@ -574,6 +574,14 @@ export interface CompiledAuthProvider {
 	name: string;
 	env?: { vars: string[] } | { hook: string };
 	allowsMissingApiKey?: boolean;
+	/** Login creates and persists a distinct local client registration. */
+	registrationLogin?: boolean;
+	/** Credentials may only be resolved from this provider's stored OAuth accounts. */
+	oauthOnly?: boolean;
+	/** Credentials stay local instead of entering exported authentication pools. */
+	localOnly?: boolean;
+	/** Whether exhausting quota may rotate to another stored account; defaults to true. */
+	allowQuotaRotation?: boolean;
 	/** Login-sourced API keys use the provider's subscription quota rather than metered billing. */
 	loginSubscription?: boolean;
 	/** Qualify credential and usage-report identity by org when an email may have multiple subscriptions. */

@@ -13,7 +13,7 @@
  */
 
 import type { Api, FetchImpl, Model, SimpleStreamOptions, StreamOptions } from "../types";
-import type { OAuthController, OAuthCredentials } from "./oauth/types";
+import type { OAuthController, OAuthCredentials, OAuthLoginResult, OAuthRefreshContext } from "./oauth/types";
 
 /**
  * API-key environment fallback: either a single env var name (e.g.
@@ -36,6 +36,8 @@ export type ProviderSimpleOptionsMapper = (options: SimpleStreamOptions) => Read
 
 export interface ProviderModelDiscoveryConfig {
 	readonly apiKey?: string;
+	/** Stable registration associated with the selected OAuth token, when present. */
+	readonly registrationId?: string;
 	readonly baseUrl?: string;
 	readonly fetch?: FetchImpl;
 	readonly authenticated?: boolean;
@@ -73,6 +75,8 @@ export interface ProviderDefinition {
 	readonly nativeAuthApis?: readonly string[];
 	/** Provider-owned model normalization that must run before API-specific option mapping. */
 	readonly prepareModel?: ProviderModelPreparer;
+	/** Validate a provider-owned route before custom APIs or transports can short-circuit dispatch. */
+	readonly validateModel?: (model: Model<Api>) => void;
 	/** Provider-owned request shaping applied before generic API dispatch. */
 	readonly prepareRequest?: ProviderRequestPreparer;
 	/** Provider-owned projection from the generic simple-stream option bag. */
@@ -81,9 +85,9 @@ export interface ProviderDefinition {
 	readonly prepareModelDiscovery?: ProviderModelDiscoveryPreparer;
 	// --- interactive login (OAuthProviderInterface-compatible) ---
 	/** Interactive login; flows that need `onPrompt`/`onAuth` reject a bare controller at runtime. */
-	readonly login?: (callbacks: OAuthController) => Promise<OAuthCredentials | string>;
+	readonly login?: (callbacks: OAuthController) => Promise<OAuthLoginResult>;
 	/** Refresh a stored grant; the signal bounds provider network work to refresh ownership. */
-	readonly refreshToken?: (credentials: OAuthCredentials, signal?: AbortSignal) => Promise<OAuthCredentials>;
+	readonly refreshToken?: (credentials: OAuthCredentials, signal?: AbortSignal, context?: OAuthRefreshContext) => Promise<OAuthCredentials>;
 	readonly getApiKey?: (credentials: OAuthCredentials) => string;
 	/** Store OAuth credentials under a different provider id (e.g. `openai-codex-device` ⇒ `openai-codex`). */
 	readonly storeCredentialsAs?: string;

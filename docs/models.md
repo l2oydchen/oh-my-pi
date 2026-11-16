@@ -2,6 +2,8 @@
 
 This document describes how the coding-agent currently loads models, applies overrides, resolves credentials, and chooses models at runtime.
 
+For local ChatGPT plan authentication, see [Sign in with ChatGPT](./openai-chatgpt.md). The `openai-chatgpt` provider coexists with API-key providers and uses each registration's discovered model catalog.
+
 ## What controls model behavior
 
 Primary implementation files:

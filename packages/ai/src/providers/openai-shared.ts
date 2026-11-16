@@ -4483,13 +4483,15 @@ export function populateResponsesUsageFromResponse(
 		accounting.totalTokens = reportedTotalTokens ?? accounting.totalTokens + orchestrationTotal;
 	}
 
-	// Wholesale replacement must not drop provider-annotated extras (Copilot
-	// premium-request accounting): the failed/cancelled paths throw right after
-	// this call with no later chance to re-apply.
+	// Wholesale replacement must preserve provider annotations (premium-request
+	// accounting and unpriced plan usage): failed/cancelled paths throw right
+	// after this call with no later chance to re-apply.
 	const premiumRequests = output.usage.premiumRequests;
+	const hasUnpricedUsage = output.usage.hasUnpricedUsage;
 	output.usage = {
 		...accounting,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		...(hasUnpricedUsage ? { hasUnpricedUsage } : {}),
 	};
 	if (premiumRequests !== undefined) {
 		output.usage.premiumRequests = premiumRequests;

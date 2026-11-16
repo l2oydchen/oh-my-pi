@@ -21,6 +21,7 @@ import type { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-st
 import { litellmUsageProvider } from "@oh-my-pi/pi-ai/usage/litellm";
 import { buildDiscoveredModel, buildModel, nextBuildPriceChange } from "@oh-my-pi/pi-catalog/build";
 import { collapseBuiltVariants } from "@oh-my-pi/pi-catalog/compat/collapse";
+import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
 import {
 	clampCodexContextWindow,
 	clampsContextOverride,
@@ -33,6 +34,7 @@ import {
 	fingerprintStaticModels,
 	type ModelManagerOptions,
 	type ModelRefreshStrategy,
+	type ModelResolutionResult,
 } from "@oh-my-pi/pi-catalog/model-manager";
 import { getBundledModels, getBundledProviders } from "@oh-my-pi/pi-catalog/models";
 import {
@@ -55,7 +57,7 @@ import { generateCodexAttestation } from "../live/attestation";
 import { redactUrlForLog } from "../mcp/json-rpc";
 import type { AuthStorage } from "../session/auth-storage";
 import { type ApiKeyResolverModel, type ApiKeyResolverOptions, createApiKeyResolver } from "./api-key-resolver";
-import type { ConfigError, ConfigFile, LoadResult } from "./config-file";
+import { ConfigError, type ConfigFile, type LoadResult } from "./config-file";
 import {
 	buildCustomModelOverlay,
 	type CustomModelDefinitionLike,
@@ -115,9 +117,11 @@ import {
 	isAuthenticated,
 	isDiscoveryBearerApiKey,
 	kNoAuth,
+	mergeRegisteredOAuthCatalogs,
 	type ProviderDiscoveryState,
 	RUNTIME_DYNAMIC_MODEL_FETCH_TIMEOUT_MS,
 	resolveOAuthDiscoveryAccounts,
+	resolveRegisteredOAuthDiscoveryAccounts,
 	SPECIAL_MODEL_MANAGER_PROVIDER_IDS,
 	STARTUP_MODEL_CACHE_PROVIDER_IDS,
 	withModelDiscoveryTimeout,
@@ -2192,6 +2196,7 @@ export class ModelRegistry {
 		const allModelOverrides = new Map<string, Map<string, ModelOverride>>();
 		const keylessProviders = new Set<string>();
 		const discoverableProviders: DiscoveryProviderConfig[] = [];
+		const discoveryErrors: Array<{ instancePath: string; message: string }> = [];
 		const providerEntries = Object.entries(value.providers ?? {});
 		const configuredProviders = new Set(Object.keys(value.providers ?? {}));
 		for (const [providerName, providerConfig] of providerEntries) {
@@ -2253,7 +2258,15 @@ export class ModelRegistry {
 				keylessProviders.add(providerName);
 			}
 
-			if (providerConfig.discovery && (providerConfig.api || providerConfig.discovery.type === "proxy")) {
+			if (providerConfig.discovery && authPolicyFor(providerName)?.registrationLogin) {
+				discoveryErrors.push({
+					instancePath: `providers.${providerName}.discovery`,
+					message:
+						"Custom discovery is not supported for registered OAuth accounts. " +
+						"Remove this discovery setting; built-in per-account model discovery remains available. " +
+						"Other configuration is still loaded.",
+				});
+			} else if (providerConfig.discovery && (providerConfig.api || providerConfig.discovery.type === "proxy")) {
 				const disableStrictCompat = providerConfig.disableStrictTools ? { disableStrictTools: true } : undefined;
 				discoverableProviders.push({
 					provider: providerName,
@@ -2299,6 +2312,9 @@ export class ModelRegistry {
 			keylessProviders,
 			discoverableProviders,
 			configuredProviders,
+			...(discoveryErrors.length > 0
+				? { error: new ConfigError(this.#modelsConfigFile.path(), discoveryErrors) }
+				: {}),
 			found: true,
 		};
 	}
@@ -2692,9 +2708,20 @@ export class ModelRegistry {
 			return { models: [], authoritativeProviders: new Set(), replaceRuntimeProviders: new Set() };
 		}
 		const writesBefore = getModelCacheWriteStats();
-		const discoveries = await Promise.all(
-			managerOptions.map(options => this.#discoverWithModelManager(options, strategy)),
-		);
+		const registrationManagers = new Map<string, ModelManagerOptions<Api>[]>();
+		const ordinaryManagers = managerOptions.filter(options => {
+			if (!authPolicyFor(options.providerId)?.registrationLogin) return true;
+			const group = registrationManagers.get(options.providerId);
+			if (group) group.push(options);
+			else registrationManagers.set(options.providerId, [options]);
+			return false;
+		});
+		const discoveries = await Promise.all([
+			...ordinaryManagers.map(options => this.#discoverWithModelManager(options, strategy)),
+			...[...registrationManagers].map(([provider, options]) =>
+				this.#discoverRegistrationModelManagers(provider, options, strategy),
+			),
+		]);
 		const writesAfter = getModelCacheWriteStats();
 		const rewrittenRows = writesAfter.payloadWrites - writesBefore.payloadWrites;
 		if (rewrittenRows > MODEL_CACHE_REWRITE_LOG_THRESHOLD) {
@@ -2887,6 +2914,9 @@ export class ModelRegistry {
 		});
 		const standardProviderKeys = await Promise.all(
 			standardProviderDescriptors.map(descriptor => {
+				// Registered OAuth catalogs resolve each account independently below;
+				// discovery must not rank or change a session's selected credential.
+				if (authPolicyFor(descriptor.providerId)?.registrationLogin) return undefined;
 				const cacheProviderId = isCredentialScopedModelCacheProvider(descriptor.providerId)
 					? undefined
 					: this.#resolveStartupModelCacheProviderId(descriptor.providerId);
@@ -2911,6 +2941,26 @@ export class ModelRegistry {
 		const options: ModelManagerOptions<Api>[] = [];
 		for (let i = 0; i < standardProviderDescriptors.length; i++) {
 			const descriptor = standardProviderDescriptors[i];
+			if (authPolicyFor(descriptor.providerId)?.registrationLogin) {
+				const accounts = await resolveRegisteredOAuthDiscoveryAccounts(
+					this.authStorage,
+					descriptor.providerId,
+					strategy === "offline",
+				);
+				for (const account of accounts) {
+					options.push(
+						descriptor.createModelManagerOptions({
+							apiKey: account.accessToken,
+							registrationId: account.registrationId,
+							fetch: this.#fetch,
+						}),
+					);
+				}
+				// An empty group still replaces its previous in-memory catalog after
+				// logout or failed account resolution. It cannot read a bound cache.
+				if (accounts.length === 0) options.push(descriptor.createModelManagerOptions({}));
+				continue;
+			}
 			const apiKey = standardProviderKeys[i];
 			const hasExplicitVllmConfig =
 				descriptor.providerId === "vllm" &&
@@ -2937,6 +2987,7 @@ export class ModelRegistry {
 					region: identity?.region,
 					inferenceRegion: identity?.inferenceRegion,
 					orgId: identity?.orgId,
+					registrationId: identity?.registrationId,
 				};
 				const preparedConfig =
 					getProviderDefinition(descriptor.providerId)?.prepareModelDiscovery?.(discoveryConfig) ??
@@ -2989,6 +3040,67 @@ export class ModelRegistry {
 			}
 		}
 		return options;
+	}
+
+	/** Reuse the ordinary manager per registration, then publish one account-aware roster. */
+	async #discoverRegistrationModelManagers(
+		provider: string,
+		options: readonly ModelManagerOptions<Api>[],
+		strategy: ModelRefreshStrategy,
+	): Promise<BuiltInDiscoveryResult> {
+		const results = await Promise.all(
+			options.map(async (option): Promise<ModelResolutionResult<Api>> => {
+				try {
+					const manager = createModelManager({ ...option, cacheDbPath: this.#cacheDbPath });
+					return await withModelDiscoveryTimeout(RUNTIME_DYNAMIC_MODEL_FETCH_TIMEOUT_MS, () =>
+						manager.refresh(strategy),
+					);
+				} catch (error) {
+					return {
+						models: [],
+						stale: true,
+						source: "bundled",
+						fetchError: error instanceof Error ? error.message : String(error),
+					};
+				}
+			}),
+		);
+		// A logout can finish while a model request is in flight. Re-read active
+		// registrations before publishing so it cannot resurrect that roster.
+		const activeRegistrationIds = new Set(
+			getOAuthCredentialsForProvider(this.authStorage, provider).flatMap(credential =>
+				credential.registrationId && !credential.pendingRotation ? [credential.registrationId] : [],
+			),
+		);
+		const models = mergeRegisteredOAuthCatalogs(
+			results.map(result => result.models),
+			activeRegistrationIds,
+		);
+		const stale = results.some(result => result.stale);
+		const source = results.some(result => result.source === "provider")
+			? "provider"
+			: results.some(result => result.source === "cache")
+				? "cache"
+				: "bundled";
+		const errors = results.flatMap(result => (result.fetchError ? [result.fetchError] : []));
+		const fetchedAt = Math.max(0, ...results.map(result => result.updatedAt ?? 0)) || undefined;
+		this.#providerDiscoveryStates.set(provider, {
+			provider,
+			status: models.length > 0 ? (source === "provider" ? "ok" : "cached") : stale ? "unavailable" : "empty",
+			optional: false,
+			stale,
+			source,
+			fetchedAt,
+			models: models.map(model => model.id),
+			...(errors.length > 0 ? { error: errors.join("; ") } : {}),
+		});
+		return {
+			models,
+			authoritativeProviders: new Set(stale ? [] : [provider]),
+			// Always replace the complete group, including cache-only and empty
+			// results. No union from an earlier registration set survives logout.
+			replaceRuntimeProviders: new Set([provider]),
+		};
 	}
 
 	async #discoverWithModelManager(

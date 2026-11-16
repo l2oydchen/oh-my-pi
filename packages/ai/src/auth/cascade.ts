@@ -8,6 +8,7 @@ import { AUTHENTICATED_SENTINEL } from "../registry/types";
 import type { SessionAffinity } from "./affinity";
 import type { CredentialPool } from "./pool";
 import type { CredentialSelector, OAuthResolutionResult } from "./select";
+import { hasOAuthRegistrations, type AuthCredentialStore } from "./store";
 import type {
 	AuthApiKeyOptions,
 	AuthPeekOptions,
@@ -40,6 +41,7 @@ export class KeyOverrides {
 	}
 
 	has(provider: string): boolean {
+		if (authPolicyFor(provider)?.oauthOnly) return false;
 		return this.#runtimeOverrides.has(provider) || this.#configOverrides.has(provider);
 	}
 
@@ -51,19 +53,23 @@ export class KeyOverrides {
 	 * a pooled OAuth token there (see `KeyCascade.get`).
 	 */
 	suppressesOAuth(provider: string, restricted: boolean): boolean {
+		if (authPolicyFor(provider)?.oauthOnly) return false;
 		return restricted ? this.#configOverrides.has(provider) : this.has(provider);
 	}
 
 	runtimeKey(provider: string): string | undefined {
+		if (authPolicyFor(provider)?.oauthOnly) return undefined;
 		return this.#runtimeOverrides.get(provider);
 	}
 
 	configKey(provider: string): string | undefined {
+		if (authPolicyFor(provider)?.oauthOnly) return undefined;
 		return this.#configOverrides.get(provider);
 	}
 
 	/** Config value consulted only after stored OAuth/login credentials. */
 	fallbackKey(provider: string): string | undefined {
+		if (authPolicyFor(provider)?.oauthOnly) return undefined;
 		return this.#configFallbacks.get(provider);
 	}
 
@@ -142,6 +148,7 @@ export class KeyOverrides {
 
 /** Dependencies of the provider key precedence cascade. */
 export interface KeyCascadeDeps {
+	store: AuthCredentialStore;
 	pool: CredentialPool;
 	overrides: KeyOverrides;
 	selector: CredentialSelector;
@@ -216,6 +223,8 @@ export class KeyCascade implements KeysApi {
 	 */
 	source(provider: string, { env = "dedicated" }: AuthSourceOptions = {}): AuthSource | undefined {
 		if (providerPauseReason(provider) !== undefined) return undefined;
+		if (authPolicyFor(provider)?.localOnly && !hasOAuthRegistrations(this.#deps.store)) return undefined;
+		if (authPolicyFor(provider)?.oauthOnly) return this.#getAuthBearingCredentials(provider).some(item => item.type === "oauth") ? { kind: "oauth", concrete: true } : undefined;
 		if (this.#deps.overrides.runtimeKey(provider) !== undefined) return { kind: "runtime", concrete: true };
 		if (this.#deps.overrides.configKey(provider) !== undefined) return { kind: "config", concrete: true };
 		const bearing = this.#getAuthBearingCredentials(provider);
@@ -258,6 +267,7 @@ export class KeyCascade implements KeysApi {
 	 */
 	async peek(provider: string, options?: AuthPeekOptions): Promise<string | undefined> {
 		if (providerPauseReason(provider) !== undefined) return undefined;
+		if (authPolicyFor(provider)?.localOnly && !hasOAuthRegistrations(this.#deps.store)) return undefined;
 		const runtimeKey = this.#deps.overrides.runtimeKey(provider);
 		if (runtimeKey) {
 			return runtimeKey;
@@ -281,8 +291,8 @@ export class KeyCascade implements KeysApi {
 				"oauth",
 				undefined,
 				credential =>
-					credential.type === "oauth" && Number.isFinite(credential.expires) && credential.expires > now,
-			) ?? (options?.includeExpired ? this.#deps.selector.selectByType(provider, "oauth") : undefined);
+					credential.type === "oauth" && !credential.pendingRotation && Number.isFinite(credential.expires) && credential.expires > now,
+			) ?? (options?.includeExpired ? this.#deps.selector.selectByType(provider, "oauth", undefined, credential => credential.type === "oauth" && !credential.pendingRotation) : undefined);
 		if (oauthSelection) {
 			if (provider === "github-copilot") {
 				return JSON.stringify({
@@ -293,6 +303,7 @@ export class KeyCascade implements KeysApi {
 			}
 			return oauthSelection.credential.access;
 		}
+		if (authPolicyFor(provider)?.oauthOnly) return undefined;
 
 		const loginApiKeySelection = this.#deps.selector.selectByType(
 			provider,
@@ -388,6 +399,7 @@ export class KeyCascade implements KeysApi {
 		// A provider turned off in its auth rules is reached by no key source:
 		// runtime, models.yml, stored, env or broker.
 		if (providerPauseReason(provider) !== undefined) return undefined;
+		if (authPolicyFor(provider)?.localOnly && !hasOAuthRegistrations(this.#deps.store)) return undefined;
 		const restricted = this.#deps.affinity.isRestricted(provider, sessionId);
 		// Runtime override takes highest priority
 		const runtimeKey = restricted ? undefined : this.#deps.overrides.runtimeKey(provider);
@@ -425,11 +437,15 @@ export class KeyCascade implements KeysApi {
 		}
 		if (oauthResolved) {
 			if (onCredentialId && oauthResolved.credentialId !== undefined) {
-				const { accountId, orgId, region, inferenceRegion } = oauthResolved.credential;
-				const identity = { accountId, orgId, region, inferenceRegion };
+				const { registrationId, accountId, orgId, region, inferenceRegion } = oauthResolved.credential;
+				const identity = { registrationId, accountId, orgId, region, inferenceRegion };
 				onCredentialId(oauthResolved.credentialId, identity, oauthResolved.credential.access);
 			}
 			return oauthResolved.apiKey;
+		}
+		if (authPolicyFor(provider)?.oauthOnly) {
+			if (oauthRefreshFailure) throw oauthRefreshFailure;
+			return undefined;
 		}
 		if (restricted) {
 			if (oauthRefreshFailure) throw oauthRefreshFailure;

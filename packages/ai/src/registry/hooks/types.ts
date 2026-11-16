@@ -6,13 +6,13 @@
  * `test/auth-hooks-registry.test.ts`.
  */
 import type { FetchImpl } from "../../types";
-import type { OAuthController, OAuthCredentials, OAuthPrompt } from "../oauth/types";
+import type { OAuthController, OAuthCredentials, OAuthLoginResult, OAuthPrompt, OAuthRefreshContext } from "../oauth/types";
 
 /** Whole-flow login implementation (`login "custom" hook=…`); rejects a bare controller at runtime when it needs prompts. */
-export type LoginHook = (callbacks: OAuthController) => Promise<OAuthCredentials | string>;
+export type LoginHook = (callbacks: OAuthController) => Promise<OAuthLoginResult>;
 
 /** Whole-flow refresh implementation (`refresh hook=…`). */
-export type RefreshHook = (credentials: OAuthCredentials, signal?: AbortSignal) => Promise<OAuthCredentials>;
+export type RefreshHook = (credentials: OAuthCredentials, signal?: AbortSignal, context?: OAuthRefreshContext) => Promise<OAuthCredentials>;
 
 /** Runtime context handed to `after-exchange` / `after-refresh` hooks. */
 export interface ExchangeContext {

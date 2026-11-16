@@ -455,6 +455,7 @@ function addUsage(target: UsageStatistics, usage: Usage | undefined): void {
 	target.orchestrationCacheRead += usage.orchestration?.cacheRead ?? 0;
 	target.premiumRequests += usage.premiumRequests ?? 0;
 	target.cost += usage.cost.total;
+	if (usage.hasUnpricedUsage) target.hasUnpricedUsage = true;
 }
 
 /**
@@ -468,6 +469,7 @@ function resetUsageCost(usage: Usage | undefined): void {
 	usage.cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
 	usage.credits = undefined;
 	usage.premiumRequests = undefined;
+	usage.hasUnpricedUsage = undefined;
 }
 
 /** Clear child billing kept in task results without discarding their token counts. */

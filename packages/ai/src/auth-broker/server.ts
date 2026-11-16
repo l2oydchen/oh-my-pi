@@ -11,6 +11,7 @@
  */
 
 import { type Type, type } from "@oh-my-pi/omptype";
+import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AuthCredentialSnapshotEntry, AuthStorage, StoredCredentialBlock } from "../auth-storage";
 import { parseBind } from "../utils/parse-bind";
@@ -469,7 +470,12 @@ class SnapshotSource {
 	#currentRows(): GenerationSnapshotRows {
 		if (this.#rows?.generation === this.#storage.credentials.generation) return this.#rows;
 		const snapshot = this.#storage.credentials.snapshot();
-		const rows: GenerationSnapshotRows = { generation: snapshot.generation, credentials: snapshot.credentials };
+		// This snapshot crosses the broker's credential-sharing boundary. Local
+		// OMP workers still use AuthStorage's unfiltered, in-process snapshot.
+		const rows: GenerationSnapshotRows = {
+			generation: snapshot.generation,
+			credentials: snapshot.credentials.filter(entry => !authPolicyFor(entry.provider)?.localOnly),
+		};
 		this.#rows = rows;
 		return rows;
 	}
@@ -848,6 +854,16 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 					return json(401, { error: "unauthorized" });
 				}
 				const peer = resolvePeer(req, socketPeer, opts.trustProxyHeaders);
+				const credentialRoute = [REFRESH_ROUTE, DISABLE_ROUTE, BLOCK_ROUTE, BLOCKS_ROUTE]
+					.map(pattern => pathname.match(pattern))
+					.find(match => match !== null);
+				if (credentialRoute) {
+					const id = Number.parseInt(credentialRoute[1], 10);
+					const entry = opts.storage.credentials.snapshot().credentials.find(candidate => candidate.id === id);
+					if (entry && authPolicyFor(entry.provider)?.localOnly) {
+						return json(403, { error: "This credential is restricted to its local OMP installation" });
+					}
+				}
 				if (req.method === "GET" && pathname === "/v1/snapshot/stream") {
 					return serveSnapshotStream(req, snapshotSource, streamHub, peer, streamKeepaliveMs);
 				}
@@ -929,7 +945,8 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 				}
 				if (req.method === "GET" && pathname === "/v1/credentials/disabled") {
 					const provider = url.searchParams.get("provider") ?? undefined;
-					const disabled = await opts.storage.credentials.listDisabled(provider, req.signal);
+					const disabled = (await opts.storage.credentials.listDisabled(provider, req.signal))
+						.filter(entry => !authPolicyFor(entry.provider)?.localOnly);
 					const body: DisabledCredentialsResponse = { generatedAt: Date.now(), disabled };
 					return json(200, body);
 				}
@@ -1055,6 +1072,9 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 					const parsed = await parseBody(req, credentialUploadRequestSchema);
 					if (!parsed.ok) return parsed.response;
 					const { provider, credential } = parsed.data;
+					if (authPolicyFor(provider)?.localOnly) {
+						return json(403, { error: "This provider stores credentials only in its local OMP installation" });
+					}
 					try {
 						const entries = await opts.storage.credentials.upsert(provider, credential);
 						const identity =

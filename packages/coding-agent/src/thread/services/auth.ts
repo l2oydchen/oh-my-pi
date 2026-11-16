@@ -234,7 +234,10 @@ function serveAuthStorage(state: PeerAuthState): RpcServe<AuthStorage, AuthStora
 		"keys.setResolver": (storage, resolver) => storage.keys.setResolver(resolver),
 		"keys.resolver": (storage, provider, options) => storage.keys.resolver(provider, options),
 
-		"oauth.login": (storage, provider, ctrl) => storage.oauth.login(provider, ctrl),
+		"oauth.login": (storage, provider, ctrl, options) => storage.oauth.login(provider, ctrl, options),
+		"oauth.registrations": (storage, provider) => storage.oauth.registrations(provider),
+		"oauth.logoutRegistration": (storage, provider, registrationId, signal) =>
+			storage.oauth.logoutRegistration(provider, registrationId, signal),
 		"oauth.access": (storage, provider, sessionId, options) => storage.oauth.access(provider, sessionId, options),
 		"oauth.accessAll": (storage, provider, options) => storage.oauth.accessAll(provider, options),
 		"oauth.accessById": (storage, provider, id, options) => storage.oauth.accessById(provider, id, options),

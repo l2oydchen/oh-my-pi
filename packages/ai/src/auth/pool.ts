@@ -57,6 +57,7 @@ export function authCredentialEquals(left: AuthCredential, right: AuthCredential
 		return right.type === "api_key" && left.key === right.key;
 	}
 	if (right.type !== "oauth") return false;
+	if (left.authMode === "chatgpt-siwc" || right.authMode === "chatgpt-siwc") return JSON.stringify(left) === JSON.stringify(right);
 	return (
 		left.access === right.access &&
 		left.refresh === right.refresh &&
@@ -752,7 +753,8 @@ export class CredentialPool implements CredentialsApi {
 			for (const entry of stored) {
 				const credential = entry.credential;
 				const redacted: SnapshotCredential =
-					credential.type === "api_key" ? credential : { ...credential, refresh: REMOTE_REFRESH_SENTINEL };
+					credential.type === "api_key" ? credential : { ...credential, refresh: REMOTE_REFRESH_SENTINEL,
+						...(credential.authMode === "chatgpt-siwc" ? { idToken: undefined, authorizationNonce: undefined, pendingRotation: undefined } : {}) };
 				entries.push({
 					id: entry.id,
 					provider,

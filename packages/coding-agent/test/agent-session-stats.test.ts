@@ -96,6 +96,22 @@ describe("AgentSession session stats", () => {
 		expect(stats.assistantMessages).toBe(0);
 	});
 
+	it("keeps the active-window monetary subtotal marked when auxiliary calls use ChatGPT plan usage", () => {
+		const target = model();
+		const manager = SessionManager.inMemory();
+		appendUsage(manager, target, 11);
+		appendUsage(manager, target, 7, {
+			hasUnpricedUsage: true,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		});
+		session = createStatsSession(manager, target);
+		expect(session.getSessionStats()).toMatchObject({
+			tokens: { input: 18, total: 18 },
+			cost: 11,
+			hasUnpricedUsage: true,
+		});
+	});
+
 	it("keeps mixed peak and off-peak charges in session and footer totals after resume", async () => {
 		const target = modelRegistry.find("deepseek", "deepseek-v4-flash");
 		if (!target) throw new Error("Expected bundled DeepSeek Flash");

@@ -7,6 +7,7 @@
  */
 
 import { type } from "@oh-my-pi/omptype";
+import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
 import { readSseEvents } from "@oh-my-pi/pi-utils";
 import type { AuthCredential, DisabledCredentialSummary, OAuthRefreshReason } from "../auth-storage";
 import type {
@@ -369,6 +370,9 @@ export class AuthBrokerClient {
 		credential: AuthCredential,
 		signal?: AbortSignal,
 	): Promise<CredentialUploadResponse> {
+		if (authPolicyFor(provider)?.localOnly) {
+			throw new AuthBrokerError("This provider requires local OMP credential storage", { status: 403 });
+		}
 		const body: CredentialUploadRequest = { provider, credential };
 		return this.#request<CredentialUploadResponse>("POST", "/v1/credential", {
 			body,

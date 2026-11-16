@@ -12,6 +12,7 @@ import type {
 	OAuthProviderId,
 	OAuthProviderInfo,
 	OAuthProviderInterface,
+	OAuthRefreshContext,
 } from "./types";
 
 export * from "./anthropic";
@@ -132,6 +133,7 @@ export async function refreshOAuthToken(
 	provider: OAuthProvider,
 	credentials: OAuthCredentials,
 	signal?: AbortSignal,
+	context?: OAuthRefreshContext,
 ): Promise<OAuthCredentials> {
 	if (!credentials) {
 		throw new AIError.OAuthError(`No OAuth credentials found for ${provider}`, {
@@ -150,7 +152,7 @@ export async function refreshOAuthToken(
 	}
 	// Providers without a real refresher (static bearer tokens / API keys that
 	// don't expire) return the credentials unchanged.
-	return def.refreshToken ? def.refreshToken(credentials, signal) : credentials;
+	return def.refreshToken ? def.refreshToken(credentials, signal, context) : credentials;
 }
 const JWT_EXPIRY_SKEW_MS = 5 * 60_000;
 export function normalizeOAuthCredentialExpiry<T extends OAuthCredentials>(provider: string, credentials: T): T {

@@ -91,6 +91,13 @@ describe("/login slash command", () => {
 		expect(harness.getSelectorProvider()).toBe("parallel");
 	});
 
+	it("routes /login openai-chatgpt through the existing provider login flow", async () => {
+		const harness = createRuntimeHarness(new OAuthManualInputManager());
+		expect(await executeBuiltinSlashCommand("/login openai-chatgpt", harness.runtime)).toBe(true);
+		expect(harness.getSelectorMode()).toBe("login");
+		expect(harness.getSelectorProvider()).toBe("openai-chatgpt");
+	});
+
 	it("warns when no pending login exists for manual callback", async () => {
 		const manualInput = new OAuthManualInputManager();
 		const harness = createRuntimeHarness(manualInput);

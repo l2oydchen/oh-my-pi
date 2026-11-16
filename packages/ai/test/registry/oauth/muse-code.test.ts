@@ -104,7 +104,7 @@ async function loginMuse(fetchImpl: FetchImpl, onAuth: (url: string, instruction
 		fetch: fetchImpl,
 		onAuth: info => onAuth(info.url, info.instructions ?? ""),
 	});
-	if (typeof credentials === "string") throw new Error("expected OAuth credentials");
+	if (typeof credentials === "string" || "kind" in credentials) throw new Error("expected OAuth credentials");
 	return credentials;
 }
 

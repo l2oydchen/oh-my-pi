@@ -18,7 +18,7 @@ import { fileHyperlink } from "../render/hyperlink";
 import { getSessionAccentAnsi, getSessionAccentHex } from "../theme/session-color";
 import { summarizeLoopCondition } from "./loop";
 import { formatMetric } from "../components/metric";
-import { formatBillingSummary } from "./metrics";
+import { formatBillingSummary, isUsingChatGPTPlan } from "./metrics";
 import { sanitizeStatusText } from "../chrome/shared";
 import {
 	formatContextUsage,
@@ -791,7 +791,7 @@ const tokenRateSegment: StatusLineSegment = {
 
 /** Billing summary for the `cost` segment, or undefined when there is nothing to bill. */
 function costSummary(ctx: SegmentContext): string | undefined {
-	const { cost, premiumRequests } = ctx.usageStats;
+	const { cost, premiumRequests, hasUnpricedUsage } = ctx.usageStats;
 	// `cost` folds in completed task results; show the session's own spend and
 	// the subagent tree separately. The hub-projected tree total also covers
 	// grandchildren and running/async agents, but it lags persisted-roster
@@ -816,6 +816,8 @@ function costSummary(ctx: SegmentContext): string | undefined {
 			cost: ownCost,
 			subagentCost,
 			usingSubscription,
+			usingChatGPTPlan: isUsingChatGPTPlan(state.model),
+			hasUnpricedUsage,
 			premiumRequests,
 			fractionDigits: 2,
 			pricingPeriod,

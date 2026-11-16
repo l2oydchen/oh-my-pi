@@ -1,0 +1,39 @@
+// Sign in with ChatGPT uses the public API with a distinct OAuth contract.
+// The account's live roster is the only source of selectable model ids; do
+// not seed API/Codex models or enroll this account-specific roster in gen:models.
+provider "openai-chatgpt" {
+	default-model "gpt-5.5"
+	dynamic-models-authoritative #true
+	skip-cross-provider-reference-fills #true
+	pricing-status "included"
+	supports-websockets #true
+	hosted-image #false
+	image-model #false
+	omit-max-output-tokens #true
+	responses-request-contract "chatgpt"
+	store-responses #false
+	supports-configuration-update #false
+	supports-steering #false
+	supports-sampling-params #false
+	supports-penalty-and-stop-params #false
+	supports-long-prompt-cache-retention #false
+	supports-prompt-cache-breakpoints #false
+	uses-openai-tool-call-id-limit #true
+
+	// Discovery reports names and visibility, not reasoning or modalities.
+	// Repair only reviewed GPT reasoning lineages using the shared class rules.
+	class "openai" {
+		// The hosted-tool class+API+revision grant ties this provider+class+revision
+		// scope; the explicit priority keeps the SIWC deployment restriction.
+		revision ">=5" priority=1 {
+			thinking-upgrade-neutral #true
+			input-modalities "text" "image"
+			// These provider limits also override the more specific GPT-family
+			// grants, not just the per-API defaults above.
+			supports-configuration-update #false
+			supports-steering #false
+			hosted-image #false
+			image-model #false
+		}
+	}
+}

@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added Sign in with ChatGPT model discovery with a separate catalog for each local account registration.
 - Added Modal as a hosted inference provider ([#18785](https://github.com/can1357/oh-my-pi/pull/18785) by [@andrewhinh](https://github.com/andrewhinh))
 
 ### Changed

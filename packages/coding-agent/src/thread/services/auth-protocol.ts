@@ -52,6 +52,8 @@ import type {
 	OAuthCredential,
 	OAuthLoginController,
 	OAuthLoginIdentity,
+	OAuthLoginOptions,
+	OAuthRegistrationSummary,
 	OAuthProviderId,
 	OAuthRefreshByIdOptions,
 	ObservedUsageInput,
@@ -194,7 +196,15 @@ export type AuthStorageProtocol = {
 		ApiKeyResolver
 	>;
 
-	"oauth.login": RpcMethod<[provider: OAuthProviderId, ctrl: OAuthLoginController], OAuthLoginIdentity | undefined>;
+	"oauth.login": RpcMethod<
+		[provider: OAuthProviderId, ctrl: OAuthLoginController, options?: OAuthLoginOptions],
+		OAuthLoginIdentity | undefined
+	>;
+	"oauth.registrations": RpcMethod<[provider: string], OAuthRegistrationSummary[]>;
+	"oauth.logoutRegistration": RpcMethod<
+		[provider: string, registrationId: string, signal?: AbortSignal],
+		{ remoteRevoked: boolean }
+	>;
 	"oauth.access": RpcMethod<
 		[provider: string, sessionId?: string, options?: AuthApiKeyOptions],
 		OAuthAccess | undefined

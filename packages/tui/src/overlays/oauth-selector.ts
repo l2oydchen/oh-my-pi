@@ -1,4 +1,4 @@
-import type { CredentialsApi, KeysApi } from "@oh-my-pi/pi-ai";
+import type { CredentialsApi, KeysApi, OAuthApi } from "@oh-my-pi/pi-ai";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthProviderInfo } from "@oh-my-pi/pi-ai/oauth/types";
 import {
@@ -30,6 +30,7 @@ const OAUTH_SELECTOR_MAX_VISIBLE = 10;
 export interface OAuthSelectorAuthSource {
 	readonly credentials: Pick<CredentialsApi, "has">;
 	readonly keys: Pick<KeysApi, "source">;
+	readonly oauth?: Pick<OAuthApi, "registrations">;
 }
 
 /**
@@ -168,8 +169,18 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	}
 	#hasSelectableAuth(providerId: string): boolean {
 		return this.#mode === "logout"
-			? this.#authStorage.credentials.has(providerId)
-			: this.#authStorage.keys.source(providerId) !== undefined;
+			? this.#authStorage.credentials.has(providerId) ||
+				this.#authStorage.oauth?.registrations(providerId).some(registration => registration.status !== "signed_out") === true
+			: this.#authStorage.keys.source(providerId) !== undefined || this.#hasIdentityOnlyLogin(providerId);
+	}
+
+	#hasIdentityOnlyLogin(providerId: string): boolean {
+		return (
+			this.#authStorage.keys.source(providerId) === undefined &&
+			this.#authStorage.oauth?.registrations(providerId).some(
+				registration => registration.status === "signed_in" && registration.planAccess === "disabled",
+			) === true
+		);
 	}
 
 	#loadProviders(disabledProviders: readonly string[] = []): void {
@@ -201,7 +212,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 
 		let pending = 0;
 		for (const provider of this.#menu.items) {
-			if (!this.#hasSelectableAuth(provider.id)) {
+			if (!this.#hasSelectableAuth(provider.id) || this.#hasIdentityOnlyLogin(provider.id)) {
 				this.#authState.delete(provider.id);
 				continue;
 			}
@@ -277,6 +288,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	}
 
 	#getStatusIndicator(providerId: string): string {
+		if (this.#hasIdentityOnlyLogin(providerId)) return theme.fg("warning", " signed in · plan usage disabled");
 		const state = this.#authState.get(providerId);
 		const source = this.#getSourceLabel(providerId);
 		if (state === "checking") {
@@ -473,6 +485,9 @@ export class OAuthSelectorComponent extends OverlayPanel {
 
 	/** Credential status of a provider row: `value` (state) and `detail` (origin) spans. */
 	#describeStatus(providerId: string): { value?: readonly TspSpan[]; detail?: readonly TspSpan[] } {
+		if (this.#hasIdentityOnlyLogin(providerId)) {
+			return { value: [span("signed in", "success")], detail: [span("plan usage disabled", "warning")] };
+		}
 		const origin = this.#authStorage.keys.source(providerId);
 		const detail = origin
 			? [
@@ -495,8 +510,9 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	#pickerItem(provider: OAuthProviderInfo): TspPickerItem {
 		const origin = this.#authStorage.keys.source(provider.id);
 		const state = this.#authState.get(provider.id);
+		const identityOnly = this.#hasIdentityOnlyLogin(provider.id);
 		const dot: TspTone =
-			state === "checking"
+			identityOnly ? "warning" : state === "checking"
 				? "pending"
 				: state === "invalid"
 					? "error"
@@ -508,7 +524,7 @@ export class OAuthSelectorComponent extends OverlayPanel {
 				? `env: ${origin.envVar}`
 				: ORIGIN_LABELS[origin.kind]
 			: undefined;
-		const detail = !source
+		const detail = identityOnly ? "Signed in · plan usage disabled" : !source
 			? "Not configured"
 			: origin?.kind === "oauth"
 				? `Signed in · ${source}`

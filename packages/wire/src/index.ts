@@ -57,6 +57,8 @@ export interface WireUsage {
 	cacheWrite: number;
 	totalTokens: number;
 	cost: { total: number };
+	/** The monetary subtotal excludes usage billed through a plan or credits. */
+	hasUnpricedUsage?: boolean;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

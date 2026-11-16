@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added ChatGPT registration choices to login and logout, with plan-use status and cost labels that preserve unpriced usage when switching providers.
+
 ## [18.20.1] - 2026-11-14
 
 ### Added

@@ -48,7 +48,9 @@ async function loginZai(fetchImpl: FetchImpl, code = "auth-code"): Promise<OAuth
 		fetch: fetchImpl,
 	};
 	const credentials = await getProviderDefinition("zai-coding-plan")?.login?.(callbacks);
-	if (!credentials || typeof credentials === "string") throw new Error("expected structured credentials");
+	if (!credentials || typeof credentials === "string" || "kind" in credentials) {
+		throw new Error("expected structured credentials");
+	}
 	return credentials;
 }
 
@@ -182,7 +184,7 @@ describe("zai oauth flow", () => {
 			onManualCodeInput: async () => `auth-code#${new URL(authUrl).searchParams.get("state")}`,
 		});
 
-		if (typeof credentials === "string") throw new Error("expected structured credentials");
+		if (typeof credentials === "string" || "kind" in credentials) throw new Error("expected structured credentials");
 		expect(credentials.access).toBe("created-key.real-secret");
 		expect(nativeReceiverSpy).toHaveBeenCalledWith("zcode", { signal: controller.signal });
 		expect(progress).toContain(
@@ -236,7 +238,7 @@ describe("zai oauth flow", () => {
 			onManualCodeInput: requestManualInput,
 		});
 
-		if (typeof credentials === "string") throw new Error("expected structured credentials");
+		if (typeof credentials === "string" || "kind" in credentials) throw new Error("expected structured credentials");
 		expect(credentials.access).toBe("created-key.real-secret");
 		expect(events).toEqual(["listen:zcode", "auth", "callback", "dispose"]);
 		expect(requestManualInput).toHaveBeenCalledTimes(1);
@@ -274,7 +276,7 @@ describe("zai oauth flow", () => {
 			onManualCodeInput: async () => `manual-code#${new URL(authUrl).searchParams.get("state")}`,
 		});
 
-		if (typeof credentials === "string") throw new Error("expected structured credentials");
+		if (typeof credentials === "string" || "kind" in credentials) throw new Error("expected structured credentials");
 		expect(credentials.access).toBe("created-key.real-secret");
 		expect(nativeWaitAborted).toBe(true);
 		expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ code: "manual-code" });
@@ -347,7 +349,7 @@ describe("zai oauth flow", () => {
 			onManualCodeInput: () => manualInput.promise,
 		});
 
-		if (typeof credentials === "string") throw new Error("expected structured credentials");
+		if (typeof credentials === "string" || "kind" in credentials) throw new Error("expected structured credentials");
 		expect(credentials.access).toBe("created-key.real-secret");
 		expect(disposeRequestCounts).toEqual([6]);
 		expect(progress).toContain(

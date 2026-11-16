@@ -8,6 +8,7 @@
  * every gateway client's 30-day sticky row resident.
  */
 import * as os from "node:os";
+import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
 import { getAppName, getInstallId, logger, postmortem } from "@oh-my-pi/pi-utils";
 import type { AuthCredentialStore } from "../auth/store";
 import {
@@ -91,6 +92,7 @@ function isCredentialInAccountPool(
 	entry: Pick<SnapshotEntry, "provider" | "credential" | "identityKey">,
 	accountPool: ReadonlyMap<string, ResolvedProviderPool> | undefined,
 ): boolean {
+	if (authPolicyFor(entry.provider)?.localOnly) return false;
 	const rule = providerPoolRule(accountPool, entry.provider);
 	if (!rule) return true;
 	if (entry.credential.type !== "oauth") return rule.apiKeys;

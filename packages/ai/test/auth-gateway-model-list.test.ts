@@ -11,16 +11,24 @@ test("model listing exposes one provider-qualified route per upstream model", as
 	const storage = await AuthStorage.create(path.join(dir, "auth.db"));
 	const anthropic = createMockModel({ provider: "anthropic", id: "shared-model" });
 	const devin = createMockModel({ provider: "devin", id: "shared-model" });
+	const chatgpt = createMockModel({ provider: "openai-chatgpt", id: "plan-model" });
 	const handle = startAuthGateway({
 		bind: "127.0.0.1:0",
 		bearerTokens: [],
 		storage,
-		resolveModel: () => undefined,
-		listModels: () => [anthropic, anthropic, devin, devin],
+		resolveModel: id => (id === "openai-chatgpt/plan-model" ? chatgpt : undefined),
+		listModels: () => [anthropic, anthropic, devin, devin, chatgpt],
 		version: "test",
 	});
 
 	try {
+		const planRequest = await fetch(`${handle.url}/v1/responses`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ model: "openai-chatgpt/plan-model", input: "hello", stream: true }),
+		});
+		expect(planRequest.status).toBe(403);
+		expect(await planRequest.text()).toContain("local OMP");
 		const response = await fetch(`${handle.url}/v1/models`);
 		expect(response.status).toBe(200);
 		expect(await response.json()).toEqual({

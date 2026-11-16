@@ -226,6 +226,8 @@ export interface Usage {
 	cacheWrite: number;
 	/** Sum of input + output + cacheRead + cacheWrite plus provider-side orchestration tokens when reported. */
 	totalTokens: number;
+	/** Some usage has no dollar price; `cost` contains only the known monetary subtotal. */
+	hasUnpricedUsage?: boolean;
 	/** Provider-reported occupied context tokens when the value is authoritative but not a billable input/output bucket. */
 	contextTokens?: number;
 	/** Provider-side orchestration tokens, billed but not part of the conversation prompt/cache buckets. */
@@ -537,6 +539,8 @@ export interface OpenAICompat {
 	supportsReasoningSummary?: boolean;
 	/** Whether to chain OpenAI Responses turns using stored response ids. Unset uses the official-endpoint default; env and call options take precedence. */
 	statefulResponses?: boolean;
+	/** Restricted Responses request dialect for ChatGPT sign-in tokens. */
+	responsesRequestContract?: "chatgpt";
 	/**
 	 * Whether the endpoint accepts explicit sampling parameters (`temperature`,
 	 * `top_p`, `top_k`, `min_p`, penalties). OpenAI proprietary reasoning models
@@ -1050,6 +1054,7 @@ export type ResolvedOpenAICompat = ResolvedOpenAISharedCompat &
 			| "supportsReasoningParams"
 			| "supportsReasoningSummary"
 			| "statefulResponses"
+			| "responsesRequestContract"
 			| "supportsSamplingParams"
 			| "supportsPenaltyAndStopParams"
 			| "thinkingFormat"
@@ -1164,6 +1169,8 @@ export interface ResolvedOpenAIResponsesCompat extends ResolvedOpenAISharedCompa
 	supportsReasoningSummary: boolean;
 	/** Optional chaining override; unset falls back to officialEndpoint at request time. */
 	statefulResponses?: boolean;
+	/** Restricted Responses request dialect for ChatGPT sign-in tokens. */
+	responsesRequestContract?: "chatgpt";
 	/**
 	 * Whether the host can store Responses results server-side (`store: true`).
 	 * Rule-owned: hosts that keep generating after a client disconnect so a

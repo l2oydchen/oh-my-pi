@@ -28,6 +28,7 @@
  * serves them over HTTP behind bearer auth, `stdio.ts` over JSON lines.
  */
 
+import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
 import { Effort } from "@oh-my-pi/pi-catalog/effort";
 import { clampThinkingLevelForModel, getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { type ModelKind, modelKind } from "@oh-my-pi/pi-catalog/types";
@@ -816,6 +817,7 @@ function handleModelsList(opts: AuthGatewayRouteOptions): Response {
 	const seen = new Set<string>();
 	const data: ModelListRow[] = [];
 	for (const model of opts.listModels?.() ?? []) {
+		if (authPolicyFor(model.provider)?.localOnly) continue;
 		const id = `${model.provider}/${model.id}`;
 		if (seen.has(id)) continue;
 		seen.add(id);

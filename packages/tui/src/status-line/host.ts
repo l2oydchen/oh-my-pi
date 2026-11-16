@@ -92,6 +92,7 @@ export interface StatusLineSession {
 			orchestrationCacheRead: number;
 			premiumRequests: number;
 			cost: number;
+			hasUnpricedUsage?: boolean;
 			/** Portion of `cost` carried by completed subagent task results. */
 			subagentCost?: number;
 		};

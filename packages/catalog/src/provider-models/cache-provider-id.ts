@@ -4,6 +4,7 @@ import { CURSOR_DEFAULT_BASE_URL } from "../wire/cursor";
 import { type AccountScope, factoryDroidModelCacheProviderId } from "../wire/factory-droid";
 import { PERSONAL_GITHUB_COPILOT_BASE_URL } from "../wire/github-copilot";
 import { normalizeModalBaseUrl } from "../wire/modal";
+import { OPENAI_CHATGPT_BASE_URL } from "../wire/openai-chatgpt";
 import {
 	SINGULARITYAPI_DEV_API_BASE_URL,
 	SINGULARITYAPI_TECH_API_BASE_URL,
@@ -12,10 +13,12 @@ import {
 
 export interface ModelCacheProviderIdOptions extends AccountScope {
 	apiKey?: string;
+	registrationId?: string;
 	baseUrl?: string;
 }
 
 const CREDENTIAL_SCOPED_MODEL_CACHE_PROVIDERS: Readonly<Record<string, true>> = {
+	"openai-chatgpt": true,
 	"opencode-go": true,
 	"opencode-zen": true,
 	"github-copilot": true,
@@ -51,6 +54,8 @@ export function isCredentialScopedModelCacheProvider(providerId: string): boolea
 
 export function getDefaultModelDiscoveryBaseUrl(providerId: string): string | undefined {
 	switch (providerId) {
+		case "openai-chatgpt":
+			return OPENAI_CHATGPT_BASE_URL;
 		case "charm-hyper":
 			return CHARM_HYPER_API_BASE_URL;
 		case "kimi-code":
@@ -113,6 +118,13 @@ function jwtCredentialSubject(apiKey: string): string | undefined {
 /** Resolve the cache namespace used by a provider's model-manager options without constructing those options. */
 export function resolveModelCacheProviderId(providerId: string, options: ModelCacheProviderIdOptions = {}): string {
 	switch (providerId) {
+		case "openai-chatgpt": {
+			// Refresh rotates the bearer but not the verified local registration.
+			// An unbound startup read must never reuse another registration's roster.
+			if (!options.registrationId) return `${providerId}:models-v1:unbound`;
+			const scope = `${options.registrationId}\u0000${OPENAI_CHATGPT_BASE_URL}`;
+			return `${providerId}:models-v1:${Bun.hash(scope).toString(36)}`;
+		}
 		case "openai-codex": {
 			// The backend filters the roster by client version. A Codex-compatible
 			// gateway publishes its own roster; discovery is authoritative, so the

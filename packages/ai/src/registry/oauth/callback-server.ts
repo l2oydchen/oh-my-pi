@@ -39,7 +39,7 @@ const IPV6_COMPANION_ATTEMPTS = 4;
  */
 const LAUNCH_PATH = "/launch";
 
-export type CallbackResult = { code: string; state: string };
+export type CallbackResult = { code: string; state: string; clientId?: string };
 
 /**
  * Subset of {@link Bun.Server} this flow depends on, so a `localhost` flow can
@@ -112,6 +112,8 @@ export interface OAuthCallbackFlowOptions {
 	manualInputOnly?: boolean;
 	/** Receive a custom-scheme redirect through the native OS handler when supported. */
 	nativeScheme?: boolean;
+	/** Keep authorization URLs containing identity hints inside the loopback launcher. */
+	privateAuthorizationUrl?: boolean;
 }
 
 function parseNativeCallback(input: string, redirectUri: string, expectedState: string): CallbackResult {
@@ -152,7 +154,7 @@ function parseNativeCallback(input: string, redirectUri: string, expectedState: 
 /**
  * Abstract base class for OAuth flows with local callback servers.
  */
-export abstract class OAuthCallbackFlow {
+export abstract class OAuthCallbackFlow<TResult = OAuthCredentials> {
 	ctrl: OAuthController;
 	preferredPort: number;
 	callbackPath: string;
@@ -161,6 +163,8 @@ export abstract class OAuthCallbackFlow {
 	allowPortFallback: boolean;
 	#manualInputOnly: boolean;
 	#nativeScheme: boolean;
+	#privateAuthorizationUrl = false;
+	#launchNonce = crypto.randomUUID();
 	#callbackResolve?: (result: CallbackResult) => void;
 	#callbackReject?: (error: Error) => void;
 	/**
@@ -195,6 +199,7 @@ export abstract class OAuthCallbackFlow {
 		this.allowPortFallback = preferredPortOrOptions.allowPortFallback ?? true;
 		this.#manualInputOnly = preferredPortOrOptions.manualInputOnly ?? false;
 		this.#nativeScheme = preferredPortOrOptions.nativeScheme ?? false;
+		this.#privateAuthorizationUrl = preferredPortOrOptions.privateAuthorizationUrl ?? false;
 	}
 
 	/**
@@ -212,7 +217,19 @@ export abstract class OAuthCallbackFlow {
 	 * @param redirectUri - The actual redirect URI used (must match authorization request)
 	 * @returns OAuth credentials
 	 */
-	abstract exchangeToken(code: string, state: string, redirectUri: string): Promise<OAuthCredentials>;
+	abstract exchangeToken(code: string, state: string, redirectUri: string, callback?: CallbackResult): Promise<TResult>;
+
+	/** Provider-specific callback fields, validated only after the state matches. */
+	validateCallback(url: URL, expectedState: string): CallbackResult {
+		return { code: url.searchParams.get("code") ?? "", state: expectedState };
+	}
+
+	/** Providers with stricter callback contracts can require the complete redirect URL. */
+	parseManualCallback(input: string, expectedState: string, _redirectUri: string): CallbackResult | null {
+		const parsed = parseCallbackInput(input);
+		if (!parsed.code || (expectedState && parsed.state && parsed.state !== expectedState)) return null;
+		return { code: parsed.code, state: parsed.state ?? "" };
+	}
 
 	/**
 	 * Generate CSRF state token. Override if provider needs custom state generation.
@@ -236,7 +253,7 @@ export abstract class OAuthCallbackFlow {
 	/**
 	 * Execute the OAuth login flow.
 	 */
-	async login(): Promise<OAuthCredentials> {
+	async login(): Promise<TResult> {
 		const state = this.generateState();
 		this.#throwIfCancelled();
 
@@ -292,7 +309,10 @@ export abstract class OAuthCallbackFlow {
 			this.#pendingAuthUrl = authUrl;
 
 			// Notify controller that auth is ready
-			this.ctrl.onAuth?.({ url: authUrl, launchUrl, instructions });
+			if (this.#privateAuthorizationUrl && !launchUrl) {
+				throw new AIError.ConfigurationError("This OAuth flow requires a local authorization launcher");
+			}
+			this.ctrl.onAuth?.({ url: this.#privateAuthorizationUrl ? launchUrl! : authUrl, launchUrl, instructions });
 			this.#throwIfCancelled();
 			this.ctrl.onProgress?.(
 				receiver || !this.#manualInputOnly
@@ -303,7 +323,7 @@ export abstract class OAuthCallbackFlow {
 
 			let callback: CallbackResult;
 			try {
-				callback = await this.#waitForCallback(state, nativeCallback);
+				callback = await this.#waitForCallback(state, redirectUri, nativeCallback);
 			} catch (error) {
 				// UI escape handlers commonly abort the controller and reject the
 				// active manual prompt in the same turn. Cancellation remains the
@@ -318,7 +338,7 @@ export abstract class OAuthCallbackFlow {
 			this.ctrl.onProgress?.("Exchanging authorization code for tokens...");
 			this.#throwIfCancelled();
 
-			return await this.exchangeToken(callback.code, state, redirectUri);
+			return await this.exchangeToken(callback.code, state, redirectUri, callback);
 		} finally {
 			this.#pendingAuthUrl = undefined;
 			receiverAbort.abort("OAuth login finished");
@@ -333,7 +353,7 @@ export abstract class OAuthCallbackFlow {
 					);
 				}
 			}
-			server?.stop();
+			server?.stop(this.#privateAuthorizationUrl);
 		}
 	}
 
@@ -448,7 +468,7 @@ export abstract class OAuthCallbackFlow {
 				return undefined;
 			}
 		}
-		return `http://${this.callbackHostname}:${port}${LAUNCH_PATH}`;
+		return `http://${this.callbackHostname}:${port}${LAUNCH_PATH}${this.#privateAuthorizationUrl ? `?key=${this.#launchNonce}` : ""}`;
 	}
 
 	/**
@@ -548,11 +568,12 @@ export abstract class OAuthCallbackFlow {
 
 		if (url.pathname !== this.callbackPath) {
 			if (url.pathname === LAUNCH_PATH) {
+				if (this.#privateAuthorizationUrl && url.searchParams.get("key") !== this.#launchNonce) return new Response("Not Found", { status: 404 });
 				const pending = this.#pendingAuthUrl;
 				if (!pending) {
 					return new Response("OAuth launch URL is no longer active", { status: 503 });
 				}
-				return Response.redirect(pending, 302);
+				return new Response(null, { status: 302, headers: { Location: pending, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
 			}
 			return new Response("Not Found", { status: 404 });
 		}
@@ -560,11 +581,12 @@ export abstract class OAuthCallbackFlow {
 		const code = url.searchParams.get("code");
 		const state = url.searchParams.get("state") || "";
 		const error = url.searchParams.get("error") || "";
-		const errorDescription = url.searchParams.get("error_description") || error;
+		const errorDescription = this.#privateAuthorizationUrl ? "Sign-in was not completed" : url.searchParams.get("error_description") || error;
 
-		type OkState = { ok: true; code: string; state: string };
+		type OkState = { ok: true } & CallbackResult;
 		type ErrorState = { ok?: false; error?: string };
 		let resultState: OkState | ErrorState;
+		let invalidProviderCallback = false;
 
 		if (error) {
 			resultState = { ok: false, error: `Authorization failed: ${errorDescription}` };
@@ -573,15 +595,20 @@ export abstract class OAuthCallbackFlow {
 		} else if (expectedState && state !== expectedState) {
 			resultState = { ok: false, error: "State mismatch - possible CSRF attack" };
 		} else {
-			resultState = { ok: true, code, state };
+			try {
+				resultState = { ok: true, ...this.validateCallback(url, expectedState) };
+			} catch (cause) {
+				invalidProviderCallback = true;
+				resultState = { ok: false, error: cause instanceof Error ? cause.message : "Invalid OAuth callback" };
+			}
 		}
 
 		if (resultState.ok) {
 			const resolve = this.#callbackResolve;
 			queueMicrotask(() => {
-				resolve?.({ code: resultState.code, state: resultState.state });
+				resolve?.({ code: resultState.code, state: resultState.state, clientId: resultState.clientId });
 			});
-		} else if (error && (!expectedState || state === expectedState)) {
+		} else if ((error || invalidProviderCallback) && (!expectedState || state === expectedState)) {
 			// The redirect carries our state nonce, so it came from the genuine
 			// authorization flow (e.g. the user denied the consent screen).
 			// Surface the denial now instead of leaving the login waiting for
@@ -606,7 +633,7 @@ export abstract class OAuthCallbackFlow {
 	/**
 	 * Wait for OAuth callback or manual input (whichever comes first).
 	 */
-	#waitForCallback(expectedState: string, nativeCallback?: Promise<CallbackResult>): Promise<CallbackResult> {
+	#waitForCallback(expectedState: string, redirectUri: string, nativeCallback?: Promise<CallbackResult>): Promise<CallbackResult> {
 		const timeoutSignal = AbortSignal.timeout(DEFAULT_TIMEOUT);
 		const settledSignal = new AbortController();
 		const signals = this.ctrl.signal
@@ -639,10 +666,7 @@ export abstract class OAuthCallbackFlow {
 					const result = await Promise.race([
 						callbackPromise,
 						requestManualInput(signal).then((input): CallbackResult | null => {
-							const parsed = parseCallbackInput(input);
-							if (!parsed.code) return null;
-							if (expectedState && parsed.state && parsed.state !== expectedState) return null;
-							return { code: parsed.code, state: parsed.state ?? "" };
+							return this.parseManualCallback(input, expectedState, redirectUri);
 						}),
 					]);
 					if (result) return result;

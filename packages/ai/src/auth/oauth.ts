@@ -1,8 +1,10 @@
-import { untilAborted } from "@oh-my-pi/pi-utils";
+import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
+import { getPersistentInstallId, prompt, untilAborted } from "@oh-my-pi/pi-utils";
 import * as AIError from "../error";
 import { getProviderDefinition, PASTE_CODE_LOGIN_PROVIDERS } from "../registry";
 import { assertProviderEnabled, getOAuthProvider, loginRiskWarning } from "../registry/oauth";
-import type { OAuthProviderId } from "../registry/oauth/types";
+import type { OAuthProviderId, OAuthRegistrationContext } from "../registry/oauth/types";
+import { revokeOpenAIChatGPT } from "../registry/oauth/openai-chatgpt";
 import { providerTypeKey } from "./blocks";
 import type { SessionAffinity } from "./affinity";
 import type { KeyOverrides } from "./cascade";
@@ -10,6 +12,8 @@ import type { AccountPolicies } from "./policy";
 import type { CredentialPool } from "./pool";
 import type { OAuthRefresher } from "./refresh";
 import type { CredentialSelector } from "./select";
+import { hasOAuthRegistrations, hasRefreshLeases, type AuthCredentialStore } from "./store";
+import registrationPrompt from "./registration-prompt.md" with { type: "text" };
 import type {
 	AuthAccountPolicy,
 	AuthApiKeyOptions,
@@ -22,6 +26,8 @@ import type {
 	OAuthCredential,
 	OAuthLoginController,
 	OAuthLoginIdentity,
+	OAuthLoginOptions,
+	OAuthRegistrationSummary,
 	OAuthRefreshByIdOptions,
 	StoredOAuthRefreshOptions,
 	StoredOAuthRefreshResult,
@@ -35,6 +41,7 @@ type StoredOAuthSelection = {
 
 /** Dependencies used by the OAuth account operations. */
 export interface OAuthAccountsDeps {
+	store: AuthCredentialStore;
 	pool: CredentialPool;
 	overrides: KeyOverrides;
 	policies: AccountPolicies;
@@ -57,7 +64,11 @@ export class OAuthAccounts implements OAuthApi {
 	 * surface which account — and for Anthropic, which organization — the
 	 * login registered.
 	 */
-	async login(provider: OAuthProviderId, ctrl: OAuthLoginController): Promise<OAuthLoginIdentity | undefined> {
+	async login(
+		provider: OAuthProviderId,
+		ctrl: OAuthLoginController,
+		options?: OAuthLoginOptions,
+	): Promise<OAuthLoginIdentity | undefined> {
 		// Only paste-code providers (fixed non-loopback redirect, e.g. GitLab Duo
 		// Agent's vscode:// URI) get a default manual-code prompt. For loopback OAuth
 		// providers an eager paste prompt adds noise to a flow that normally completes
@@ -90,6 +101,9 @@ export class OAuthAccounts implements OAuthApi {
 			);
 			if (answer.trim().toLowerCase() !== "yes") throw new AIError.LoginCancelledError();
 		}
+		const registration = authPolicyFor(provider)?.registrationLogin
+			? await this.#loginRegistrationContext(provider, ctrl, options)
+			: undefined;
 		const result = await def.login({
 			onAuth: ctrl.onAuth,
 			onProgress: ctrl.onProgress,
@@ -98,6 +112,7 @@ export class OAuthAccounts implements OAuthApi {
 			onBrowserSession: ctrl.onBrowserSession,
 			signal: ctrl.signal,
 			fetch: ctrl.fetch,
+			registration,
 		});
 		if (typeof result === "string") {
 			// Some flows (e.g. ollama) return "" to signal that no key was entered.
@@ -107,6 +122,32 @@ export class OAuthAccounts implements OAuthApi {
 			// `store-as` routes API-key logins too, not only OAuth credentials.
 			await this.#deps.pool.storeLoginApiKey(def.storeCredentialsAs ?? provider, result);
 			return { type: "api_key" };
+		}
+		if ("kind" in result && result.kind === "registered-oauth") {
+			const store = this.#deps.store;
+			if (!hasOAuthRegistrations(store)) {
+				throw new AIError.ConfigurationError("ChatGPT sign-in requires local credential storage");
+			}
+			try {
+				ctrl.signal?.throwIfAborted();
+				store.saveOAuthRegistrationLogin(def.storeCredentialsAs ?? provider, result);
+			} catch (error) {
+				await revokeOpenAIChatGPT(
+					result.registration.clientId,
+					result.credentials?.refresh ?? result.identity.refresh,
+					undefined,
+					ctrl.fetch,
+				);
+				throw error;
+			}
+			await this.#deps.pool.reload();
+			this.#deps.pool.reset(provider);
+			return {
+				type: "oauth",
+				email: result.registration.email,
+				registrationId: result.registration.registrationId,
+				planAccess: result.credentials ? "enabled" : "disabled",
+			};
 		}
 		// Stamp the interactive-login instant: providers with an absolute grant
 		// lifetime (Anthropic) need it to surface re-login deadlines, and token
@@ -127,6 +168,123 @@ export class OAuthAccounts implements OAuthApi {
 			orgId: newCredential.orgId,
 			orgName: newCredential.orgName,
 		};
+	}
+
+	async #loginRegistrationContext(
+		provider: string,
+		ctrl: OAuthLoginController,
+		options?: OAuthLoginOptions,
+	): Promise<OAuthRegistrationContext> {
+		const store = this.#deps.store;
+		if (!hasOAuthRegistrations(store)) {
+			throw new AIError.ConfigurationError(
+				"This provider requires credentials stored on this computer; remote authentication brokers are not supported",
+			);
+		}
+		const hostId = `urn:uuid:${getPersistentInstallId().toLowerCase()}`;
+		const registrations = store.listOAuthRegistrations(provider).filter(item => item.hostId === hostId);
+		let registrationId = options?.registration?.kind === "existing" ? options.registration.registrationId : undefined;
+		if (!options?.registration) {
+			if (registrations.length === 1) registrationId = registrations[0].registrationId;
+			else if (registrations.length > 1) {
+				const answer = await untilAborted(ctrl.signal, () =>
+					ctrl.onPrompt({
+						message: prompt.render(registrationPrompt, {
+							registrations: registrations.map((item, index) => ({ position: index + 1, label: item.label })),
+						}),
+					}),
+				);
+				const selection = Number(answer.trim());
+				if (!/^\d+$/.test(answer.trim()) || selection < 0 || selection > registrations.length) {
+					throw new AIError.LoginCancelledError("No ChatGPT registration selected");
+				}
+				registrationId = selection > 0 ? registrations[selection - 1].registrationId : undefined;
+			}
+		}
+		if (!registrationId) return { registrationId: crypto.randomUUID(), generation: 0, hostId, intent: options?.intent };
+		const registration = registrations.find(item => item.registrationId === registrationId);
+		if (!registration) throw new AIError.ConfigurationError("ChatGPT registration was not found on this installation");
+		if (registration.status === "signing_out") {
+			throw new AIError.ConfigurationError("This ChatGPT account is signing out; finish logout before signing in again");
+		}
+		const stored = store.getOAuthRegistrationCredential(provider, registrationId)?.credential;
+		return {
+			registrationId,
+			generation: registration.generation,
+			hostId,
+			clientId: registration.clientId,
+			issuer: registration.issuer,
+			subject: registration.subject,
+			email: registration.email,
+			idToken: stored?.type === "oauth" ? stored.idToken : registration.identity?.idToken,
+			intent: options?.intent,
+		};
+	}
+
+	registrations(provider: string): OAuthRegistrationSummary[] {
+		const store = this.#deps.store;
+		if (!hasOAuthRegistrations(store)) return [];
+		return store.listOAuthRegistrations(provider).map(item => ({
+			registrationId: item.registrationId,
+			provider: item.provider,
+			clientId: item.clientId,
+			issuer: item.issuer,
+			subject: item.subject,
+			email: item.email,
+			label: item.label,
+			status: item.status,
+			planAccess: item.planAccess,
+			credentialId: item.credentialId,
+		}));
+	}
+
+	async logoutRegistration(
+		provider: string,
+		registrationId: string,
+		signal?: AbortSignal,
+	): Promise<{ remoteRevoked: boolean }> {
+		const store = this.#deps.store;
+		if (!hasOAuthRegistrations(store)) {
+			throw new AIError.ConfigurationError("Registered OAuth logout requires local credential storage");
+		}
+		const registration = store.beginOAuthRegistrationLogout(provider, registrationId);
+		if (!registration) return { remoteRevoked: true };
+		await this.#deps.pool.reload();
+		this.#deps.pool.reset(provider);
+		const owner = crypto.randomUUID();
+		const credentialId = registration.credentialId;
+		let acquired = credentialId === undefined;
+		let remoteRevoked = false;
+		try {
+			if (credentialId !== undefined && hasRefreshLeases(store)) {
+				const deadline = Date.now() + 65_000;
+				do {
+					// Do not steal an expired lease: a stalled owner may still be
+					// receiving the rotated token. On timeout we clear locally and
+					// report remote revocation as unconfirmed instead.
+					if (store.getCredentialRefreshLeaseHolder(credentialId) === undefined) {
+						acquired = store.tryAcquireCredentialRefreshLease(credentialId, owner, Date.now() + 15_000);
+					}
+					if (acquired || signal?.aborted) break;
+					await Bun.sleep(100);
+				} while (Date.now() < deadline);
+			}
+			// A current refresh owner may checkpoint after logout starts. Read its newest token only after ownership settles.
+			const latest = store.getOAuthRegistrationCredential(provider, registrationId)?.credential;
+			const refresh =
+				latest?.type === "oauth" ? latest.pendingRotation?.refresh ?? latest.refresh : registration.identity?.refresh;
+			remoteRevoked = await revokeOpenAIChatGPT(registration.clientId, refresh, signal);
+			remoteRevoked &&= acquired;
+		} finally {
+			// Bump the generation and delete active/disabled token rows, while keeping the issued client ID.
+			store.finishOAuthRegistrationLogout(provider, registrationId, registration.generation);
+			if (credentialId !== undefined && hasRefreshLeases(store)) {
+				store.releaseCredentialRefreshLease(credentialId, owner);
+			}
+			await this.#deps.pool.reload();
+			this.#deps.pool.reset(provider);
+		}
+		return { remoteRevoked };
 	}
 
 	/**
@@ -159,6 +317,7 @@ export class OAuthAccounts implements OAuthApi {
 		const { credential, credentialId } = resolved;
 		return {
 			accessToken: credential.access,
+			registrationId: credential.registrationId, clientId: credential.clientId, issuer: credential.issuer, subject: credential.subject,
 			credentialId,
 			accountId: credential.accountId,
 			email: credential.email,
@@ -215,6 +374,7 @@ export class OAuthAccounts implements OAuthApi {
 			if (!resolved) {
 				return {
 					ok: false,
+					registrationId: selection.credential.registrationId,
 					credentialId: selection.credentialId,
 					accountId: selection.credential.accountId,
 					email: selection.credential.email,
@@ -228,6 +388,7 @@ export class OAuthAccounts implements OAuthApi {
 			const { credential, apiKey } = resolved;
 			return {
 				ok: true,
+				registrationId: credential.registrationId, clientId: credential.clientId, issuer: credential.issuer, subject: credential.subject,
 				credentialId: selection.credentialId,
 				accessToken: credential.access,
 				apiKey,
@@ -243,6 +404,7 @@ export class OAuthAccounts implements OAuthApi {
 		} catch (error) {
 			return {
 				ok: false,
+				registrationId: selection.credential.registrationId,
 				credentialId: selection.credentialId,
 				accountId: selection.credential.accountId,
 				email: selection.credential.email,
@@ -278,6 +440,8 @@ export class OAuthAccounts implements OAuthApi {
 			const active = selection.credentialId === activeCredentialId;
 			return {
 				position,
+				registrationId: selection.credential.registrationId, clientId: selection.credential.clientId,
+				issuer: selection.credential.issuer, subject: selection.credential.subject,
 				credentialId: selection.credentialId,
 				accountId: selection.credential.accountId,
 				email: selection.credential.email,
@@ -347,7 +511,7 @@ export class OAuthAccounts implements OAuthApi {
 	identity(provider: string, sessionId?: string): OAuthAccountIdentity | undefined {
 		const preferred = this.#deps.affinity.activeOAuth(provider, sessionId);
 		if (!preferred) return undefined;
-		const identity: OAuthAccountIdentity = {};
+		const identity: OAuthAccountIdentity = { registrationId: preferred.registrationId, clientId: preferred.clientId, issuer: preferred.issuer, subject: preferred.subject };
 		if (typeof preferred.accountId === "string" && preferred.accountId.length > 0) {
 			identity.accountId = preferred.accountId;
 		}
@@ -363,7 +527,7 @@ export class OAuthAccounts implements OAuthApi {
 		if (typeof preferred.orgName === "string" && preferred.orgName.length > 0) {
 			identity.orgName = preferred.orgName;
 		}
-		if (!identity.accountId && !identity.email && !identity.projectId && !identity.orgId) return undefined;
+		if (!identity.registrationId && !identity.accountId && !identity.email && !identity.projectId && !identity.orgId) return undefined;
 		return identity;
 	}
 

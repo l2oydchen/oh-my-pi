@@ -10,6 +10,7 @@
  * compare-and-set disable — only when no peer/login rotated the row first — so
  * the next snapshot pull surfaces a clean delete on the client.
  */
+import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AuthStorage } from "../auth-storage";
 import { isDefinitiveOAuthFailure } from "../error/auth-classify";
@@ -92,6 +93,7 @@ export class AuthBrokerRefresher {
 			const deadline = now + this.#refreshSkewMs;
 			const targets: number[] = [];
 			for (const entry of snapshot.credentials) {
+				if (authPolicyFor(entry.provider)?.localOnly) continue;
 				if (entry.credential.type !== "oauth") continue;
 				const expires = entry.credential.expires;
 				if (typeof expires !== "number" || !Number.isFinite(expires)) continue;

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added local Sign in with ChatGPT authentication, renewable account registrations, and public Responses API support alongside existing API-key providers.
+
 ## [18.20.3] - 2026-11-16
 
 ### Breaking Changes

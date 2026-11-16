@@ -217,7 +217,7 @@ describe("Snowflake browser OAuth", () => {
 		);
 		const login = getProviderDefinition("snowflake")!.login!;
 		const credentials = await login(controller);
-		if (typeof credentials === "string") throw new Error("Expected OAuth credentials");
+		if (typeof credentials === "string" || "kind" in credentials) throw new Error("Expected OAuth credentials");
 		expect(authorize!.origin).toBe(ACCOUNT);
 		expect(authorize!.pathname).toBe("/oauth/authorize");
 		expect(authorize!.searchParams.get("client_id")).toBe("LOCAL_APPLICATION");

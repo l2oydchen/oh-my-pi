@@ -1,3 +1,4 @@
+import type { Model } from "@oh-my-pi/pi-catalog/types";
 import { formatNumber, normalizePremiumRequests } from "@oh-my-pi/pi-utils";
 import type { Theme } from "../theme";
 
@@ -7,6 +8,10 @@ export { normalizePremiumRequests } from "@oh-my-pi/pi-utils";
 export interface BillingSummaryOptions {
 	readonly cost: number;
 	readonly usingSubscription: boolean;
+	/** The active model uses ChatGPT plan/credit usage instead of an API dollar rate. */
+	readonly usingChatGPTPlan?: boolean;
+	/** Previously recorded usage includes an amount that cannot be expressed in dollars. */
+	readonly hasUnpricedUsage?: boolean;
 	readonly premiumRequests: number;
 	readonly fractionDigits: number;
 	readonly pricingPeriod?: "peak" | "off-peak";
@@ -19,6 +24,14 @@ export interface BillingSummaryOptions {
 }
 
 type BillingUnit = "metered" | "subscription";
+
+/** Read the compiled request contract instead of inferring billing from a provider name or token. */
+export function isUsingChatGPTPlan(model: Model | undefined): boolean {
+	const compat = model?.compat;
+	return (
+		compat !== undefined && "responsesRequestContract" in compat && compat.responsesRequestContract === "chatgpt"
+	);
+}
 
 /** `showUnit: false` omits the `$`/subscription symbol when the summary already printed it. */
 function formatSpend(
@@ -60,11 +73,14 @@ export function formatBillingSummary(options: BillingSummaryOptions, uiTheme: Th
 	const premiumRequests = normalizePremiumRequests(options.premiumRequests);
 	const advisorCost = options.advisor?.cost ?? 0;
 	const subagentCost = options.subagentCost ?? 0;
+	const usingSubscription = options.usingSubscription && !options.usingChatGPTPlan;
 	if (
 		!options.cost &&
 		!subagentCost &&
 		!advisorCost &&
 		!options.usingSubscription &&
+		!options.usingChatGPTPlan &&
+		!options.hasUnpricedUsage &&
 		!premiumRequests &&
 		!options.pricingPeriod
 	) {
@@ -73,11 +89,11 @@ export function formatBillingSummary(options: BillingSummaryOptions, uiTheme: Th
 
 	const parts: string[] = [];
 	let shownUnit: BillingUnit | undefined;
-	const primaryUnit: BillingUnit = options.usingSubscription ? "subscription" : "metered";
+	const primaryUnit: BillingUnit = usingSubscription ? "subscription" : "metered";
 	if (options.cost || options.pricingPeriod || subagentCost) {
-		parts.push(formatSpend(options.cost, options.usingSubscription, options.fractionDigits, uiTheme, true));
+		parts.push(formatSpend(options.cost, usingSubscription, options.fractionDigits, uiTheme, true));
 		shownUnit = primaryUnit;
-	} else if (options.usingSubscription) {
+	} else if (usingSubscription) {
 		parts.push(
 			uiTheme.getSymbolPreset() === "nerd" && uiTheme.icon.subscription ? uiTheme.icon.subscription : "(sub)",
 		);
@@ -99,6 +115,11 @@ export function formatBillingSummary(options: BillingSummaryOptions, uiTheme: Th
 				shownUnit !== advisorUnit,
 			)}`,
 		);
+	}
+	if (options.usingChatGPTPlan) {
+		parts.push(parts.length > 0 ? "+ ChatGPT plan" : "ChatGPT plan");
+	} else if (options.hasUnpricedUsage) {
+		parts.push(parts.length > 0 ? "· contains unpriced usage" : "contains unpriced usage");
 	}
 	return parts.length > 0 ? parts.join(" ") : undefined;
 }

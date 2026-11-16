@@ -52,6 +52,22 @@ const deepseek: Model = {
 describe("fitOutputTokensToContextWindow", () => {
 	const tokenizer = new Tokenizer();
 
+	test("does not turn a ChatGPT catalog limit into an explicit request cap", () => {
+		const chatgpt = buildModel({
+			...getBundledModel("openai", "gpt-5.5"),
+			provider: "openai-chatgpt",
+			providerType: "openai-chatgpt",
+			api: "openai-responses",
+			baseUrl: "https://api.openai.com/v1",
+			contextWindow: 10_000,
+			maxTokens: 8_000,
+		});
+		expect(fitOutputTokensToContextWindow(chatgpt, promptOf(8_000), undefined, tokenizer)).toBeUndefined();
+		// A real caller cap remains explicit so the transport can report that
+		// it is unsupported, rather than silently treating it as a default.
+		expect(fitOutputTokensToContextWindow(chatgpt, promptOf(1_000), 2_048, tokenizer)).toBe(2_048);
+	});
+
 	test("leaves the cap alone while prompt plus requested output fits", () => {
 		expect(fitOutputTokensToContextWindow(deepseek, promptOf(100_000), undefined, tokenizer)).toBeUndefined();
 		expect(fitOutputTokensToContextWindow(deepseek, promptOf(100_000), 2_048, tokenizer)).toBe(2_048);

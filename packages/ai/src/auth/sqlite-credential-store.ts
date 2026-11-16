@@ -12,13 +12,14 @@ import { parseAlibabaTokenPlanCredential } from "@oh-my-pi/pi-catalog/wire/aliba
 import { parseCloudflareCredential } from "@oh-my-pi/pi-catalog/wire/cloudflare";
 import {
 	getAgentDbPath,
+	getPersistentInstallId,
 	getDbBusyTimeoutMs,
 	isSqliteBusyError,
 	isSqliteCorruptionError,
 	logger,
 	openSqliteDatabase,
 } from "@oh-my-pi/pi-utils";
-import type { AuthCredentialStore, CredentialRefreshLeaseFence, CredentialRefreshLeaseHolder } from "./store";
+import type { AuthCredentialStore, CredentialRefreshLeaseFence, CredentialRefreshLeaseHolder, StoredOAuthRegistration } from "./store";
 import type {
 	AuthCredential,
 	DisabledCredentialSummary,
@@ -26,7 +27,7 @@ import type {
 	StoredAuthCredential,
 	StoredCredentialBlock,
 } from "./types";
-import type { OAuthCredentials } from "../registry/oauth/types";
+import type { OAuthCredentials, OAuthRegistrationLoginResult, OAuthTokenResponse } from "../registry/oauth/types";
 import type { Provider } from "../types";
 import type {
 	ClientProviderUsage,
@@ -105,7 +106,7 @@ function storesSerializedCredential(row: CredentialStateRow, serialized: Seriali
 	);
 }
 
-const AUTH_SCHEMA_VERSION = 8;
+const AUTH_SCHEMA_VERSION = 9;
 const SQLITE_NOW_EPOCH = "CAST(strftime('%s','now') AS INTEGER)";
 const LEGACY_CODEX_BLOCK_PROVIDER_KEY = "openai-codex:oauth";
 const LEGACY_CODEX_BLOCK_SCOPE = "shared";
@@ -225,6 +226,7 @@ function resolveProviderCredentialIdentityKey(provider: string, identifiers: str
  */
 export function resolveCredentialIdentityKey(provider: string, credential: AuthCredential): string | null {
 	if (credential.type === "api_key") return null;
+	if (credential.registrationId) return `registration:${credential.registrationId}`;
 	return resolveProviderCredentialIdentityKey(provider, extractOAuthCredentialIdentifiers(credential));
 }
 
@@ -260,6 +262,9 @@ export function matchesReplacementCredential(
 			return existingToken !== undefined && existingToken === incomingToken;
 		}
 		return false;
+	}
+	if (incoming.registrationId || (existing.type === "oauth" && existing.registrationId)) {
+		return existing.type === "oauth" && incoming.registrationId !== undefined && incoming.registrationId === existing.registrationId;
 	}
 	const incomingIdentifiers = extractOAuthCredentialIdentifiers(incoming);
 	const incomingIdentityKey = resolveProviderCredentialIdentityKey(provider, incomingIdentifiers);
@@ -318,6 +323,7 @@ export function matchesReplacementCredential(
  * (every consumer Antigravity login has the same one) and never count.
  */
 export function isSameOAuthAccount(a: OAuthCredential, b: OAuthCredential): boolean {
+	if (a.registrationId || b.registrationId) return a.registrationId !== undefined && a.registrationId === b.registrationId;
 	const orgId = normalizeStoredAccountId(a.orgId);
 	if (orgId !== normalizeStoredAccountId(b.orgId)) return false;
 	const emailA = normalizeStoredEmail(a.email);
@@ -694,6 +700,7 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 			CREATE INDEX IF NOT EXISTS idx_client_usage_recorded ON client_usage(recorded_at);
 		`);
 		this.#ensureClientUsageAppColumn();
+		this.#createOAuthRegistrationsTable();
 
 		if (!this.#authCredentialsTableExists()) {
 			this.#createAuthCredentialsTable();
@@ -833,7 +840,7 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 			);
 			INSERT OR IGNORE INTO auth_local_change_revision (id, revision) VALUES (1, 0);
 		`);
-		for (const table of ["auth_credentials", "auth_credential_blocks"] as const) {
+		for (const table of ["auth_credentials", "auth_credential_blocks", "oauth_registrations"] as const) {
 			for (const event of ["INSERT", "UPDATE", "DELETE"] as const) {
 				this.#db.run(`
 					CREATE TRIGGER IF NOT EXISTS auth_change_revision_${table}_${event.toLowerCase()}
@@ -1288,6 +1295,202 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 
 	// ─── AuthCredentialStore interface ──────────────────────────────────────
 
+	#createOAuthRegistrationsTable(): void {
+		this.#db.run(`CREATE TABLE IF NOT EXISTS oauth_registrations (
+			registration_id TEXT PRIMARY KEY,
+			provider TEXT NOT NULL,
+			data TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_oauth_registrations_provider ON oauth_registrations(provider);`);
+	}
+
+	listOAuthRegistrations(provider?: string): StoredOAuthRegistration[] {
+		const statement = this.#db.prepare(
+			provider
+				? "SELECT data FROM oauth_registrations WHERE provider = ? ORDER BY rowid"
+				: "SELECT data FROM oauth_registrations ORDER BY rowid",
+		);
+		try {
+			const rows = (provider ? statement.all(provider) : statement.all()) as { data: string }[];
+			return rows.map(row => JSON.parse(row.data) as StoredOAuthRegistration);
+		} finally {
+			statement.finalize();
+		}
+	}
+
+	#writeOAuthRegistration(registration: StoredOAuthRegistration): void {
+		this.#db.run(
+			"INSERT INTO oauth_registrations(registration_id, provider, data) VALUES (?, ?, ?) ON CONFLICT(registration_id) DO UPDATE SET data = excluded.data",
+			[registration.registrationId, registration.provider, JSON.stringify(registration)],
+		);
+	}
+
+	getOAuthRegistrationCredential(provider: string, registrationId: string): StoredAuthCredential | undefined {
+		const statement = this.#db.prepare(
+			"SELECT id, provider, credential_type, data, disabled_cause, identity_key FROM auth_credentials WHERE provider = ? AND identity_key = ? AND disabled_cause IS NULL ORDER BY id DESC LIMIT 1",
+		);
+		try {
+			const row = statement.get(provider, `registration:${registrationId}`) as AuthRow | null;
+			const credential = row ? deserializeCredential(row) : null;
+			return row && credential ? toStoredAuthCredential(row, credential) : undefined;
+		} finally {
+			statement.finalize();
+		}
+	}
+
+	#purgeRegistrationCredentials(provider: string, registrationId: string): void {
+		const identity = `registration:${registrationId}`;
+		this.#db.run(
+			"DELETE FROM auth_credential_blocks WHERE credential_id IN (SELECT id FROM auth_credentials WHERE provider = ? AND identity_key = ?)",
+			[provider, identity],
+		);
+		this.#db.run(
+			"DELETE FROM auth_credential_refresh_leases WHERE credential_id IN (SELECT id FROM auth_credentials WHERE provider = ? AND identity_key = ?)",
+			[provider, identity],
+		);
+		this.#db.run("DELETE FROM auth_credentials WHERE provider = ? AND identity_key = ?", [provider, identity]);
+	}
+
+	saveOAuthRegistrationLogin(provider: string, result: OAuthRegistrationLoginResult): void {
+		this.#db.transaction(() => {
+			const incoming = result.registration;
+			if (incoming.hostId !== `urn:uuid:${getPersistentInstallId().toLowerCase()}`) {
+				throw new Error("The ChatGPT registration belongs to a different installation");
+			}
+			const registrations = this.listOAuthRegistrations(provider);
+			const current = registrations.find(item => item.registrationId === incoming.registrationId);
+			if (current && (current.generation + 1 !== incoming.generation || current.status === "signing_out")) {
+				throw new Error("ChatGPT login changed while authorization was in progress; sign in again");
+			}
+			if (!current && incoming.generation !== 1) throw new Error("ChatGPT registration no longer exists");
+			if (
+				current &&
+				(current.clientId !== incoming.clientId ||
+					current.issuer !== incoming.issuer ||
+					current.subject !== incoming.subject ||
+					current.hostId !== incoming.hostId)
+			) {
+				throw new Error("ChatGPT sign-in does not match the saved registration");
+			}
+			if (
+				registrations.some(
+					item =>
+						item.registrationId !== incoming.registrationId &&
+						item.hostId === incoming.hostId &&
+						item.issuer === incoming.issuer &&
+						item.subject === incoming.subject,
+				)
+			) {
+				throw new Error("This ChatGPT account already has a saved registration; select it to sign in again");
+			}
+			this.#purgeRegistrationCredentials(provider, incoming.registrationId);
+			let credentialId: number | undefined;
+			if (result.credentials) {
+				const serialized = serializeCredential(provider, { type: "oauth", ...result.credentials, authorizedAt: Date.now() });
+				if (!serialized) throw new Error("Could not serialize ChatGPT credentials");
+				const row = this.#insertStmt.get(provider, serialized.credentialType, serialized.data, serialized.identityKey) as {
+					id: number;
+				};
+				credentialId = row.id;
+			}
+			this.#writeOAuthRegistration({
+				registrationId: incoming.registrationId,
+				provider,
+				clientId: incoming.clientId,
+				hostId: incoming.hostId,
+				issuer: incoming.issuer,
+				subject: incoming.subject,
+				email: incoming.email,
+				label: incoming.email ?? "ChatGPT account",
+				generation: incoming.generation,
+				status: "signed_in",
+				planAccess: result.credentials ? "enabled" : "disabled",
+				credentialId,
+				identity: result.credentials ? undefined : result.identity,
+			});
+		}).immediate();
+	}
+
+	beginOAuthRegistrationLogout(provider: string, registrationId: string): StoredOAuthRegistration | undefined {
+		return this.#db.transaction(() => {
+			const registration = this.listOAuthRegistrations(provider).find(item => item.registrationId === registrationId);
+			if (!registration) return undefined;
+			if (registration.status !== "signed_out") {
+				registration.status = "signing_out";
+				this.#writeOAuthRegistration(registration);
+			}
+			return registration;
+		}).immediate();
+	}
+
+	finishOAuthRegistrationLogout(provider: string, registrationId: string, generation: number): void {
+		this.#db.transaction(() => {
+			const registration = this.listOAuthRegistrations(provider).find(item => item.registrationId === registrationId);
+			if (!registration || registration.generation !== generation) return;
+			this.#purgeRegistrationCredentials(provider, registrationId);
+			this.#writeOAuthRegistration({
+				...registration,
+				identity: undefined,
+				credentialId: undefined,
+				status: "signed_out",
+				planAccess: "disabled",
+				generation: generation + 1,
+			});
+		}).immediate();
+	}
+
+	disableOAuthRegistrationPlan(
+		id: number,
+		expectedData: string,
+		tokens: OAuthTokenResponse,
+		lease: CredentialRefreshLeaseFence,
+	): boolean {
+		return this.#db.transaction(() => {
+			const row = this.#getCredentialStateStmt.get(id) as CredentialStateRow | null;
+			if (
+				!row ||
+				row.data !== expectedData ||
+				row.disabled_cause !== null ||
+				!this.#holdsCredentialRefreshLeaseStmt.get(id, lease.owner, lease.nowMs)
+			) return false;
+			const credential = JSON.parse(row.data) as OAuthCredentials;
+			const registration = this.listOAuthRegistrations(row.provider).find(
+				item => item.registrationId === credential.registrationId,
+			);
+			if (
+				!registration ||
+				registration.generation !== credential.registrationGeneration ||
+				registration.status !== "signed_in"
+			) return false;
+			this.#purgeRegistrationCredentials(row.provider, registration.registrationId);
+			this.#writeOAuthRegistration({
+				...registration,
+				credentialId: undefined,
+				planAccess: "disabled",
+				identity: {
+					...tokens,
+					idToken: tokens.idToken ?? credential.idToken,
+					authorizationNonce: credential.authorizationNonce,
+				},
+			});
+			return true;
+		}).immediate();
+	}
+
+	#registrationAllowsCredential(provider: string, credential: AuthCredential, checkpoint = false): boolean {
+		if (credential.type !== "oauth" || credential.authMode !== "chatgpt-siwc") return true;
+		const registration = this.listOAuthRegistrations(provider).find(
+			item => item.registrationId === credential.registrationId,
+		);
+		return (
+			registration !== undefined &&
+			registration.generation === credential.registrationGeneration &&
+			registration.hostId === `urn:uuid:${getPersistentInstallId().toLowerCase()}` &&
+			registration.planAccess === "enabled" &&
+			(registration.status === "signed_in" || (checkpoint && registration.status === "signing_out"))
+		);
+	}
+
 	listAuthCredentials(provider?: string): StoredAuthCredential[] {
 		const rows =
 			(provider
@@ -1298,6 +1501,7 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		for (const row of rows) {
 			const credential = deserializeCredential(row);
 			if (!credential) continue;
+			if (!this.#registrationAllowsCredential(row.provider, credential)) continue;
 			results.push(toStoredAuthCredential(row, credential));
 		}
 		return results;
@@ -1516,8 +1720,15 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		credential: AuthCredential,
 		lease?: CredentialRefreshLeaseFence,
 	): boolean {
+		return credential.type === "oauth" && credential.authMode === "chatgpt-siwc"
+			? this.#db.transaction(() => this.#tryUpdateCredential(id, expectedData, credential, lease)).immediate()
+			: this.#tryUpdateCredential(id, expectedData, credential, lease);
+	}
+
+	#tryUpdateCredential(id: number, expectedData: string, credential: AuthCredential, lease?: CredentialRefreshLeaseFence): boolean {
 		const row = this.#getCredentialStateStmt.get(id) as CredentialStateRow | null;
 		const provider = row?.provider ?? "";
+		if (!this.#registrationAllowsCredential(provider, credential, credential.type === "oauth" && credential.pendingRotation !== undefined)) return false;
 		const serialized = serializeCredential(provider, credential);
 		if (!serialized) return false;
 		if (
@@ -1556,6 +1767,13 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 	}
 
 	async deleteAuthCredential(id: number, disabledCause: string): Promise<boolean> {
+		const row = this.#getCredentialStateStmt.get(id) as CredentialStateRow | null;
+		if (row?.credential_type === "oauth") {
+			const credential = JSON.parse(row.data) as OAuthCredentials;
+			if (credential.authMode === "chatgpt-siwc") {
+				return this.tryDisableAuthCredentialIfMatches(id, row.data, disabledCause);
+			}
+		}
 		try {
 			const result = this.#deleteStmt.run(normalizeDisabledCause(disabledCause), id);
 			return result.changes > 0;
@@ -1577,6 +1795,39 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		disabledCause: string,
 		lease?: CredentialRefreshLeaseFence,
 	): boolean {
+		return this.#db.transaction(() => {
+			const disabled = this.#disableCredentialIfMatches(id, expectedData, disabledCause, lease);
+			if (!disabled) return false;
+			const row = this.#getCredentialStateStmt.get(id) as CredentialStateRow | null;
+			if (row?.credential_type === "oauth") {
+				const credential = JSON.parse(row.data) as OAuthCredentials;
+				if (credential.authMode === "chatgpt-siwc" && credential.registrationId) {
+					const registration = this.listOAuthRegistrations(row.provider).find(
+						item => item.registrationId === credential.registrationId,
+					);
+					this.#purgeRegistrationCredentials(row.provider, credential.registrationId);
+					if (registration) {
+						this.#writeOAuthRegistration({
+							...registration,
+							identity: undefined,
+							credentialId: undefined,
+							planAccess: "disabled",
+							status:
+								registration.status === "signing_out"
+									? "signing_out"
+									: disabledCause === "deleted by user"
+										? "signed_out"
+										: "reauth_required",
+							generation: registration.generation + (registration.status === "signing_out" ? 0 : 1),
+						});
+					}
+				}
+			}
+			return true;
+		})();
+	}
+
+	#disableCredentialIfMatches(id: number, expectedData: string, disabledCause: string, lease?: CredentialRefreshLeaseFence): boolean {
 		const result = lease
 			? (this.#deleteIfMatchesWithLeaseStmt.run(
 					normalizeDisabledCause(disabledCause),
@@ -1592,6 +1843,9 @@ export class SqliteAuthCredentialStore implements AuthCredentialStore {
 		return result.changes > 0;
 	}
 	async deleteAuthCredentials(provider: string, disabledCause: string): Promise<void> {
+		for (const registration of this.listOAuthRegistrations(provider)) {
+			this.finishOAuthRegistrationLogout(provider, registration.registrationId, registration.generation);
+		}
 		try {
 			this.#deleteByProviderStmt.run(normalizeDisabledCause(disabledCause), provider);
 		} catch {

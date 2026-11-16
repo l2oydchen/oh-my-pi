@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import { stripVTControlCharacters } from "node:util";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
 import type { Model } from "@oh-my-pi/pi-catalog/types";
 import { renderSegment } from "../src/status-line/segments";
@@ -19,6 +20,7 @@ interface CostCtxOptions {
 	model?: Model;
 	now?: Date;
 	usingSubscription?: boolean;
+	hasUnpricedUsage?: boolean;
 	premiumRequests?: number;
 	onAdvisorSubscriptionProbe: () => void;
 }
@@ -33,6 +35,7 @@ function costCtx(options: CostCtxOptions): SegmentContext {
 			cacheWrite: 0,
 			premiumRequests: options.premiumRequests ?? 0,
 			cost: options.cost ?? 0,
+			hasUnpricedUsage: options.hasUnpricedUsage,
 			subagentCost: options.subagentCost,
 			tokensPerSecond: null,
 		},
@@ -50,6 +53,22 @@ function costCtx(options: CostCtxOptions): SegmentContext {
 }
 
 describe("cost status-line segment", () => {
+	it("keeps known API spend distinct from ChatGPT plan usage after model switches", () => {
+		const apiModel = getBundledModel("openai", "gpt-5.5");
+		const chatGPTModel = buildModel({ ...apiModel, provider: "openai-chatgpt", compat: undefined });
+		const render = (options: Partial<CostCtxOptions>) =>
+			stripVTControlCharacters(
+				renderSegment("cost", costCtx({ onAdvisorSubscriptionProbe: () => {}, ...options })).content,
+			);
+		expect(render({ model: chatGPTModel, usingSubscription: true, hasUnpricedUsage: true })).toBe("ChatGPT plan");
+		expect(
+			render({ model: chatGPTModel, usingSubscription: true, hasUnpricedUsage: true, cost: 0.75 }),
+		).toBe("$0.75 + ChatGPT plan");
+		expect(render({ model: apiModel, hasUnpricedUsage: true, cost: 0.75 })).toBe(
+			"$0.75 · contains unpriced usage",
+		);
+	});
+
 	// Regression for #10129: the advisor-subscription probe walks the full model
 	// catalog (getAvailable() → hasAuth per provider → credential-file reads) when
 	// no advisors are active. The status line re-renders at the animation cadence

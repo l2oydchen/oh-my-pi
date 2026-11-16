@@ -56,6 +56,7 @@ export function storesResponsesServerSide(
 	model: Model<"openai-responses">,
 	options: OpenAIResponsesOptions | undefined,
 ): boolean {
+	if (model.compat.responsesRequestContract === "chatgpt") return false;
 	if (model.compat.storeResponses !== true) return false;
 	return (
 		options?.storeResponses ??

@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import { resetSettingsForTest, Settings, settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { OAuthSelectorComponent } from "@oh-my-pi/pi-tui/overlays/oauth-selector";
+import { OAuthSelectorComponent, type OAuthSelectorAuthSource } from "@oh-my-pi/pi-tui/overlays/oauth-selector";
 import { initTheme } from "@oh-my-pi/pi-tui/theme";
 import type { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 
@@ -17,6 +17,35 @@ const authStorage = {
 } as unknown as AuthStorage;
 
 describe("OAuthSelectorComponent", () => {
+	it("offers an identity-only sign-in for logout without validating it as an inference credential", () => {
+		let validations = 0;
+		const source: OAuthSelectorAuthSource = {
+			credentials: { has: () => false },
+			keys: { source: () => undefined },
+			oauth: {
+				registrations: provider => provider === "openai-chatgpt" ? [{
+					registrationId: "identity-only",
+					provider,
+					clientId: "saved-client",
+					issuer: "https://auth.openai.com",
+					subject: "saved-subject",
+					label: "person@example.com",
+					status: "signed_in",
+					planAccess: "disabled",
+				}] : [],
+			},
+		};
+		const selected: string[] = [];
+		const component = new OAuthSelectorComponent("logout", source, provider => selected.push(provider), () => {}, {
+			validateAuth: async () => { validations++; return false; },
+		});
+		const rendered = component.render(100).map(line => Bun.stripANSI(line)).join("\n");
+		expect(rendered).toContain("plan usage disabled");
+		expect(validations).toBe(0);
+		component.handleInput("\n");
+		expect(selected).toEqual(["openai-chatgpt"]);
+	});
+
 	it("fuzzy-filters overflowing provider lists from typed input", () => {
 		const providers = getOAuthProviders();
 		expect(providers.length).toBeGreaterThan(10);

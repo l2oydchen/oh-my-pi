@@ -43,7 +43,9 @@ describe("gitlab duo workflow OAuth", () => {
 		};
 
 		const credentials = await getProviderDefinition("gitlab-duo-agent")?.login?.(callbacks);
-		if (!credentials || typeof credentials === "string") throw new Error("expected structured credentials");
+		if (!credentials || typeof credentials === "string" || "kind" in credentials) {
+			throw new Error("expected structured credentials");
+		}
 
 		const authorize = new URL(authUrl);
 		expect(authorize.toString()).toStartWith("https://gitlab.com/oauth/authorize?");

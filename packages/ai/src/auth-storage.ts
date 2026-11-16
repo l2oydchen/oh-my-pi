@@ -365,6 +365,7 @@ class LocalAuthStorageBackend implements AuthStorageBackend {
 		});
 		const limits = new RateLimits({ store, pool, overrides, blocks, affinity, usage, strategies });
 		const keys = new KeyCascade({
+			store,
 			pool,
 			overrides,
 			selector,
@@ -372,7 +373,7 @@ class LocalAuthStorageBackend implements AuthStorageBackend {
 			rotate: (provider, sessionId, rotateOptions) => limits.rotate(provider, sessionId, rotateOptions),
 			sourceLabel,
 		});
-		const oauth = new OAuthAccounts({ pool, overrides, policies, selector, affinity, refresher });
+		const oauth = new OAuthAccounts({ store, pool, overrides, policies, selector, affinity, refresher });
 
 		return {
 			pool,

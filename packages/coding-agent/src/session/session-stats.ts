@@ -191,6 +191,7 @@ export class SessionStatsTracker {
 		let totalCacheWrite = 0;
 		let totalTokens = 0;
 		let totalCost = 0;
+		let hasUnpricedUsage = false;
 		let totalPremiumRequests = 0;
 		let creditCost = 0;
 		let committedCreditCost = 0;
@@ -207,6 +208,7 @@ export class SessionStatsTracker {
 			totalTokens += usage.totalTokens;
 			totalPremiumRequests += usage.premiumRequests ?? 0;
 			totalCost += usage.cost.total;
+			hasUnpricedUsage ||= usage.hasUnpricedUsage === true;
 			const credits = usage.credits;
 			if (credits !== undefined) {
 				hasCredits = true;
@@ -262,6 +264,7 @@ export class SessionStatsTracker {
 				total: totalTokens,
 			},
 			cost: totalCost,
+			...(hasUnpricedUsage ? { hasUnpricedUsage: true } : undefined),
 			premiumRequests: totalPremiumRequests,
 			...(hasCredits
 				? {
@@ -511,6 +514,7 @@ const UsageShape = type({
 	cacheRead: "number",
 	cacheWrite: "number",
 	totalTokens: "number",
+	"hasUnpricedUsage?": "boolean",
 	cost: { total: "number" },
 });
 

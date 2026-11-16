@@ -608,6 +608,8 @@ export interface SessionStats {
 	};
 	premiumRequests: number;
 	cost: number;
+	/** The monetary total excludes usage without a reported dollar price. */
+	hasUnpricedUsage?: boolean;
 	credits?: {
 		cost: number;
 		committedCost: number;

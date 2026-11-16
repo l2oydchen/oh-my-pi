@@ -9,7 +9,7 @@ import type { FetchImpl } from "../src/types";
 
 async function loginViaRegistry(ctrl: OAuthController): Promise<OAuthCredentials> {
 	const result = await getProviderDefinition("factory-droid")?.login?.(ctrl);
-	if (!result || typeof result === "string") throw new Error("Factory Droid login is unavailable");
+	if (!result || typeof result === "string" || "kind" in result) throw new Error("Factory Droid login is unavailable");
 	return result;
 }
 

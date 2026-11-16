@@ -14,13 +14,22 @@ import { actionHint, hintsRow, overlayCard } from "../native/overlay";
 
 const LOGOUT_SELECTOR_MAX_VISIBLE = 10;
 
-export interface LogoutAccount {
-	credentialId: number;
+interface LogoutAccountLabel {
 	provider: string;
 	label: string;
 	detail: string;
 	type: "api_key" | "oauth";
 	active: boolean;
+}
+
+export type LogoutAccount = LogoutAccountLabel &
+	(
+		| { credentialId: number; registrationId?: never }
+		| { registrationId: string; credentialId?: never }
+	);
+
+function accountKey(account: LogoutAccount): string {
+	return account.registrationId === undefined ? String(account.credentialId) : `registration:${account.registrationId}`;
 }
 
 /** Account picker for `/logout` after the provider has been selected. */
@@ -52,10 +61,10 @@ export class LogoutAccountSelectorComponent extends OverlayPanel {
 		this.#menu = new MenuSelection<LogoutAccount>(
 			accounts,
 			{
-				getKey: account => String(account.credentialId),
+				getKey: accountKey,
 				getSearchText: account => `${account.label} ${account.detail} ${account.provider}`,
 			},
-			active ? String(active.credentialId) : undefined,
+			active ? accountKey(active) : undefined,
 		);
 
 		this.#listContainer = new Container();
@@ -154,12 +163,12 @@ export class LogoutAccountSelectorComponent extends OverlayPanel {
 				preview: "none",
 				query: null,
 				items: (this.#pickerItems ??= this.#accounts.map(account => ({
-					id: String(account.credentialId),
+					id: accountKey(account),
 					label: account.label,
 					...(account.detail ? { detail: account.detail } : {}),
 					badges: [{ text: account.type === "oauth" ? "login" : "api key" }],
 				}))),
-				current: this.#accounts.filter(account => account.active).map(account => String(account.credentialId)),
+				current: this.#accounts.filter(account => account.active).map(accountKey),
 				selected: this.#menu.selectedKey ?? null,
 				empty: "No stored accounts to log out",
 				actions: [pickerAction("confirm", "Sign out", "enter", { primary: true, danger: true }), CLOSE_ACTION],
@@ -176,7 +185,7 @@ export class LogoutAccountSelectorComponent extends OverlayPanel {
 					value: account.active ? [span("active", "muted")] : undefined,
 				},
 				undefined,
-				String(account.credentialId),
+				accountKey(account),
 			),
 		);
 		this.#nativeRoot = overlayCard(this.nativeRole, this.title, [

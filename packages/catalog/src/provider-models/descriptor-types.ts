@@ -6,6 +6,8 @@ import type { AccountScope } from "../wire/factory-droid";
 /** Config passed to a provider's runtime model-manager factory. */
 export type ModelManagerConfig = AccountScope & {
 	apiKey?: string;
+	/** Stable local OAuth registration whose credential supplies this roster. */
+	registrationId?: string;
 	baseUrl?: string;
 	fetch?: FetchImpl;
 	/** The supplied fetch already applies provider-specific authentication. */

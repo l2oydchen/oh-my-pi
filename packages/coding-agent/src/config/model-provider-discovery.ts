@@ -1,8 +1,11 @@
 import type { OAuthAccess } from "@oh-my-pi/pi-ai";
 import type { Api, Model } from "@oh-my-pi/pi-ai/types";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { authProviders } from "@oh-my-pi/pi-catalog/compat/auth";
 import type { ModelResolutionSource } from "@oh-my-pi/pi-catalog/model-manager";
 import { MODELS_DEV_CATALOG_PROVIDER_IDS, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models";
+import { unionAccountCatalogs } from "@oh-my-pi/pi-catalog/provider-models/account-access";
+import { toModelSpec } from "@oh-my-pi/pi-catalog/provider-models/bundled-references";
 import type { AuthStorage, OAuthCredential } from "../session/auth-storage";
 
 /**
@@ -131,13 +134,62 @@ export function extractGoogleOAuthProjectId(value: string | undefined): string |
 	return undefined;
 }
 
-export function getOAuthCredentialsForProvider(authStorage: AuthStorage, provider: string): OAuthCredential[] {
+export function getOAuthCredentialsForProvider(
+	authStorage: { credentials: Pick<AuthStorage["credentials"], "all"> },
+	provider: string,
+): OAuthCredential[] {
 	const providerEntry = authStorage.credentials.all()[provider];
 	if (!providerEntry) {
 		return [];
 	}
 	const entries = Array.isArray(providerEntry) ? providerEntry : [providerEntry];
 	return entries.filter((entry): entry is OAuthCredential => entry.type === "oauth");
+}
+
+export interface RegisteredOAuthDiscoveryAccount {
+	registrationId: string;
+	/** Absent when only this registration's cached roster can be read. */
+	accessToken?: string;
+}
+
+/** Resolve each local registration without ranking or changing session affinity. */
+export async function resolveRegisteredOAuthDiscoveryAccounts(
+	authStorage: {
+		credentials: Pick<AuthStorage["credentials"], "all">;
+		oauth: Pick<AuthStorage["oauth"], "accessAll">;
+	},
+	provider: string,
+	offline: boolean,
+): Promise<RegisteredOAuthDiscoveryAccount[]> {
+	const tokens = new Map<string, string>();
+	if (!offline) {
+		for (const access of await authStorage.oauth.accessAll(provider)) {
+			if (access.ok && access.registrationId) tokens.set(access.registrationId, access.accessToken);
+		}
+	}
+	// Re-read after refresh: an invalid grant or concurrent logout may remove a
+	// registration. A still-active registration whose refresh failed transiently
+	// may read its own cache, but must never send its expired or unverified token.
+	return getOAuthCredentialsForProvider(authStorage, provider).flatMap(credential =>
+		credential.registrationId && !credential.pendingRotation
+			? [{ registrationId: credential.registrationId, accessToken: tokens.get(credential.registrationId) }]
+			: [],
+	);
+}
+
+/** Union independently cached rosters, dropping registrations removed during discovery. */
+export function mergeRegisteredOAuthCatalogs(
+	catalogs: readonly (readonly Model<Api>[])[],
+	activeRegistrationIds: ReadonlySet<string>,
+): Model<Api>[] {
+	return unionAccountCatalogs(catalogs.map(models => models.map(toModelSpec))).flatMap(spec => {
+		const accountAccess = Object.fromEntries(
+			Object.entries(spec.accountAccess ?? {}).filter(([registrationId]) =>
+				activeRegistrationIds.has(registrationId),
+			),
+		);
+		return Object.keys(accountAccess).length > 0 ? [buildModel({ ...spec, accountAccess })] : [];
+	});
 }
 
 /**

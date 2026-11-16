@@ -6,7 +6,7 @@
 import type { CompiledAuthProvider, CompiledRefresh } from "@oh-my-pi/pi-catalog/compat/types";
 import * as AIError from "../../error";
 import { claudeCodeSdkVersion } from "../../providers/claude-code-fingerprint";
-import type { OAuthCredentials } from "../oauth/types";
+import type { OAuthCredentials, OAuthRefreshContext } from "../oauth/types";
 import {
 	applyAfterExchange,
 	applyUserinfo,
@@ -20,7 +20,7 @@ import {
 } from "./common";
 
 type RequestRefresh = Extract<CompiledRefresh, { kind: "request" }>;
-type Refresher = (credentials: OAuthCredentials, signal?: AbortSignal) => Promise<OAuthCredentials>;
+type Refresher = (credentials: OAuthCredentials, signal?: AbortSignal, context?: OAuthRefreshContext) => Promise<OAuthCredentials>;
 
 async function loginClient(policy: CompiledAuthProvider, signal?: AbortSignal) {
 	const login = policy.login;
@@ -103,7 +103,7 @@ export function createRefresh(policy: CompiledAuthProvider): Refresher | undefin
 	const rule = policy.refresh;
 	if (!rule || rule.kind === "none") return undefined;
 	if (rule.kind === "hook") {
-		return async (credentials, signal) => (await loadRefreshHook(rule.hook))(credentials, signal);
+		return async (credentials, signal, context) => (await loadRefreshHook(rule.hook))(credentials, signal, context);
 	}
 	return createRequestRefresh(rule, policy);
 }

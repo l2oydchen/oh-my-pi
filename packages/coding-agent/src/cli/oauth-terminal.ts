@@ -11,10 +11,13 @@ import * as readline from "node:readline";
 import {
 	type AuthStorage,
 	type OAuthLoginIdentity,
+	type OAuthLoginOptions,
 	type OAuthProviderId,
 	type OAuthProviderInfo,
 	PASTE_CODE_LOGIN_PROVIDERS,
 } from "@oh-my-pi/pi-ai";
+import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
+import { oauthRegistrationLoginChoices } from "../session/oauth-registration-choices";
 import { openPath } from "../utils/open";
 
 /**
@@ -151,6 +154,16 @@ export async function runTerminalOAuthLogin(
 	options: { openBrowser?: boolean } = {},
 ): Promise<OAuthLoginIdentity | undefined> {
 	const ask = (msg: string, signal?: AbortSignal) => promptLine(rl, `${msg} `, signal);
+	let loginOptions: OAuthLoginOptions | undefined;
+	if (authPolicyFor(provider)?.registrationLogin) {
+		await storage.credentials.reload();
+		const choices = oauthRegistrationLoginChoices(storage.oauth.registrations(provider));
+		const index =
+			choices.length === 1
+				? 0
+				: await pickIndex(rl, "Choose an account to sign in:", choices.map(choice => choice.label));
+		loginOptions = choices[index].options;
+	}
 	// Only paste-code providers (fixed non-loopback redirect, e.g. GitLab Duo
 	// Agent's vscode:// URI) get the manual paste fallback. An explicit
 	// `onManualCodeInput` is honored for ANY provider (the storage escape hatch),
@@ -190,7 +203,7 @@ export async function runTerminalOAuthLogin(
 					},
 				}
 			: undefined),
-	});
+	}, loginOptions);
 }
 
 /**
@@ -202,6 +215,7 @@ export function formatLoginIdentity(identity: OAuthLoginIdentity | undefined): s
 	if (identity?.type !== "oauth") return undefined;
 	const base = identity.email ?? identity.accountId;
 	const org = identity.orgName ?? identity.orgId;
+	if (identity.registrationId) return `${base ?? "Saved account"} (${identity.registrationId.slice(0, 8)})`;
 	if (base) return org ? `${base} (${org})` : base;
 	return org;
 }

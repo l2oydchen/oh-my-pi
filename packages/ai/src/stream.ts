@@ -893,6 +893,7 @@ function streamDispatch<TApi extends Api>(
 	options: OptionsForApi<TApi> | undefined,
 	limited: boolean,
 ): AssistantMessageEventStream {
+	getProviderDefinition(model.provider)?.validateModel?.(model);
 	// A provider turned off in its auth rules is never called, even with a key passed in directly.
 	assertProviderEnabled(model.provider);
 	const requestOptions = withSupportedSamplingParams(
@@ -1197,6 +1198,9 @@ function withSupportedSamplingParams<T extends SamplingOptions>(model: Model<Api
 		return options;
 	}
 	const compat = model.compat;
+	// SIWC reports explicitly unsupported caller options rather than silently
+	// changing them. Its Responses contract validates these before sending.
+	if (compat && "responsesRequestContract" in compat && compat.responsesRequestContract === "chatgpt") return options;
 	if (!compat || !("supportsSamplingParams" in compat) || compat.supportsSamplingParams !== false) return options;
 	const supported = { ...options };
 	delete supported.temperature;
@@ -1262,6 +1266,7 @@ function streamSimpleRequest<TApi extends Api>(
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
+	getProviderDefinition(model.provider)?.validateModel?.(model);
 	const requestOptions = withSupportedSamplingParams(
 		model,
 		withTransportFetch(model, (options || {}) as SimpleStreamOptions),

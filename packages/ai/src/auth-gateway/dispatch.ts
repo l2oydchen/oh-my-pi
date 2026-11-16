@@ -7,6 +7,7 @@
  * Everything credential-shaped lives here so each route drives the same
  * broker-backed rotation policy and the same usage ledger.
  */
+import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
 import { logger } from "@oh-my-pi/pi-utils";
 import {
 	type ApiKeyResolver,
@@ -129,6 +130,15 @@ export async function resolveGatewayApiKey(
 	signal: AbortSignal,
 	peer: string,
 ): Promise<ResolvedApiKey | GatewayErrorClassification> {
+	// A generic inference gateway serves other applications. Local OMP
+	// workers resolve credentials through their own auth service instead.
+	if (authPolicyFor(model.provider)?.localOnly) {
+		return {
+			status: 403,
+			type: "permission_error",
+			message: "This provider is available only inside its local OMP installation",
+		};
+	}
 	let apiKey: ResolvedApiKey | undefined;
 	try {
 		apiKey = await opts.storage.keys.getWithCredential(

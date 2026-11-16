@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -9,6 +9,7 @@ import {
 	RemoteAuthCredentialStore,
 	startAuthBroker,
 } from "@oh-my-pi/pi-ai/auth-broker";
+import * as piUtils from "@oh-my-pi/pi-utils";
 import { removeWithRetries } from "../../utils/src/temp";
 
 // MCP OAuth credentials extend the base OAuthCredential with refresh material
@@ -70,6 +71,86 @@ describe("auth-broker preserves extra OAuth credential fields", () => {
 		serverStorage?.close();
 		serverStore?.close();
 		await removeWithRetries(tempDir);
+		vi.restoreAllMocks();
+	});
+
+	test("keeps local plan credentials in OMP while excluding broker snapshots and mutations", async () => {
+		const provider = "openai-chatgpt";
+		const installId = "2f4d3706-124e-42eb-98d8-d5e8dfc29264";
+		vi.spyOn(piUtils, "getPersistentInstallId").mockReturnValue(installId);
+		const registration = {
+			registrationId: "local-registration",
+			generation: 1,
+			hostId: `urn:uuid:${installId}`,
+			clientId: "local-client",
+			issuer: "https://auth.openai.com",
+			subject: "local-subject",
+		};
+		const identity = {
+			idToken: "local-identity-token",
+			scopes: ["chatgpt.tokens.use.direct"],
+			authorizationNonce: "local-nonce",
+		};
+		serverStore!.saveOAuthRegistrationLogin(provider, {
+			kind: "registered-oauth",
+			registration,
+			identity,
+			credentials: {
+				...registration,
+				...identity,
+				registrationGeneration: 1,
+				authMode: "chatgpt-siwc",
+				access: "local-plan-access",
+				refresh: "local-plan-refresh",
+				expires: Date.now() + 60_000,
+			},
+		});
+		await serverStorage!.credentials.reload();
+		const local = serverStorage!.credentials.snapshot().credentials.find(entry => entry.provider === provider);
+		expect(local?.credential.type === "oauth" && local.credential.access).toBe("local-plan-access");
+		expect(JSON.stringify(local)).not.toContain("local-identity-token");
+		const client = new AuthBrokerClient({ url: handle!.url, token });
+		const result = await client.fetchSnapshot();
+		if (result.status !== 200) throw new Error("expected snapshot");
+		expect(result.snapshot.credentials.some(entry => entry.provider === provider)).toBe(false);
+		for (const action of ["refresh", "disable"]) {
+			const response = await fetch(`${handle!.url}/v1/credential/${local!.id}/${action}`, {
+				method: "POST",
+				headers: { Authorization: `Bearer ${token}` },
+			});
+			expect(response.status).toBe(403);
+		}
+		expect(serverStorage!.credentials.list(provider)).toHaveLength(1);
+	});
+
+	test("rejects local plan uploads at both the client and server boundaries", async () => {
+		const credential: OAuthCredential = {
+			type: "oauth",
+			access: "never-export-access",
+			refresh: "never-export-refresh",
+			expires: Date.now() + 60_000,
+		};
+		let outboundRequests = 0;
+		const client = new AuthBrokerClient({
+			url: handle!.url,
+			token,
+			fetchImpl: Object.assign(
+				async () => {
+					outboundRequests++;
+					return new Response(null, { status: 500 });
+				},
+				{ preconnect: fetch.preconnect },
+			),
+		});
+		await expect(client.uploadCredential("openai-chatgpt", credential)).rejects.toThrow("local OMP");
+		expect(outboundRequests).toBe(0);
+		const response = await fetch(`${handle!.url}/v1/credential`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ provider: "openai-chatgpt", credential }),
+		});
+		expect(response.status).toBe(403);
+		expect(serverStorage!.credentials.list("openai-chatgpt")).toHaveLength(0);
 	});
 
 	test("broker set -> get round-trips tokenUrl/clientId/clientSecret/resource", async () => {

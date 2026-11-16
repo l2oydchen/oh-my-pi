@@ -6,6 +6,7 @@ import { bedrockMantleTransport } from "./bedrock-mantle";
 import { buildProviderDefinition, type ProviderTransport } from "./build";
 import { cloudflareAiGatewayTransport } from "./cloudflare-ai-gateway";
 import { museCodeTransport } from "./muse-code";
+import { openAIChatGPTTransport } from "./openai-chatgpt";
 import { snowflakeTransport } from "./snowflake";
 import type { ProviderDefinition } from "./types";
 
@@ -19,6 +20,7 @@ const TRANSPORTS: Record<string, ProviderTransport> = {
 	"bedrock-mantle": bedrockMantleTransport,
 	"cloudflare-ai-gateway": cloudflareAiGatewayTransport,
 	"muse-code": museCodeTransport,
+	"openai-chatgpt": openAIChatGPTTransport,
 	snowflake: snowflakeTransport,
 };
 

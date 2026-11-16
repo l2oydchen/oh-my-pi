@@ -64,6 +64,7 @@ export type KnownProvider =
 	| "ollama"
 	| "ollama-cloud"
 	| "openai"
+	| "openai-chatgpt"
 	| "openai-codex"
 	| "opencode-go"
 	| "opencode-zen"

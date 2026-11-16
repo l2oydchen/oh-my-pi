@@ -116,7 +116,7 @@ async function loginXAI(ctrl: OAuthController = {}): Promise<OAuthCredentials> {
 		onAuth: ctrl.onAuth ?? (() => {}),
 		onPrompt: ctrl.onPrompt ?? (async () => ""),
 	});
-	if (typeof result === "string") throw new Error("expected xAI OAuth credentials");
+	if (typeof result === "string" || "kind" in result) throw new Error("expected xAI OAuth credentials");
 	return result;
 }
 

@@ -5,6 +5,7 @@ import type {
 	OAuthCredentials,
 	OAuthPrompt,
 	OAuthProviderId,
+	OAuthRefreshContext,
 } from "../registry/oauth/types";
 import type { Provider } from "../types";
 import type {
@@ -527,15 +528,18 @@ export type AuthApiKeyOptions = {
  * identity key.
  */
 export function oauthAccountKey(identity: {
+	registrationId?: string;
 	accountId?: string;
 	email?: string;
 	projectId?: string;
 }): string | undefined {
-	return identity.accountId ?? identity.email ?? identity.projectId;
+	return identity.registrationId ?? identity.accountId ?? identity.email ?? identity.projectId;
 }
 
 /** Non-secret identity bound to the OAuth credential selected for one request attempt. */
 export interface OAuthRequestIdentity {
+	/** Issued local registration selected for a ChatGPT plan request. */
+	registrationId?: string;
 	/**
 	 * Provider account UUID of the selected credential (Anthropic
 	 * `oauth_account.account_uuid`). Non-secret; lets wire identity such as the
@@ -556,6 +560,10 @@ export interface OAuthRequestIdentity {
  * leave {@link AuthStorage}.
  */
 export interface OAuthAccess {
+	registrationId?: string;
+	clientId?: string;
+	issuer?: string;
+	subject?: string;
 	accessToken: string;
 	credentialId?: number;
 	accountId?: string;
@@ -576,6 +584,8 @@ export interface OAuthAccess {
  * organization/subscription) was added, without exposing tokens.
  */
 export interface OAuthLoginIdentity {
+	registrationId?: string;
+	planAccess?: "enabled" | "disabled";
 	type: "oauth" | "api_key";
 	email?: string;
 	accountId?: string;
@@ -585,6 +595,7 @@ export interface OAuthLoginIdentity {
 
 /** Failure while resolving access to one OAuth account. */
 export interface OAuthAccessFailure {
+	registrationId?: string;
 	credentialId?: number;
 	accountId?: string;
 	email?: string;
@@ -604,6 +615,10 @@ export interface OAuthAccessFailure {
  * key usage on it (Gemini CLI / Antigravity).
  */
 export interface OAuthAccountIdentity {
+	registrationId?: string;
+	clientId?: string;
+	issuer?: string;
+	subject?: string;
 	accountId?: string;
 	email?: string;
 	projectId?: string;
@@ -626,6 +641,11 @@ export type OAuthAccessResolution = ({ ok: true; apiKey: string } & OAuthAccess)
  * selector accepted by {@link AuthStorage.oauth.accessById}.
  */
 export interface OAuthAccountSummary {
+	registrationId?: string;
+	clientId?: string;
+	issuer?: string;
+	subject?: string;
+	label?: string;
 	position: number;
 	credentialId: number;
 	accountId?: string;
@@ -666,7 +686,7 @@ export interface StoredOAuthRefreshOptions<T extends OAuthCredential = OAuthCred
 	onRefreshFailure?: (error: unknown) => void;
 	/** How long the caller waits (for the lease and the exchange); the exchange itself runs on until its backstop. */
 	refreshTimeoutMs?: number;
-	refresh: (credential: T, signal?: AbortSignal) => Promise<OAuthCredentials>;
+	refresh: (credential: T, signal?: AbortSignal, context?: OAuthRefreshContext) => Promise<OAuthCredentials>;
 	mergeRefreshedCredential?: (credential: T, refreshed: OAuthCredentials) => T;
 	isDefinitiveFailure?: (error: unknown) => boolean;
 	disabledCause?: (error: unknown) => string;
@@ -1100,6 +1120,25 @@ export interface OAuthRefreshByIdOptions {
 }
 
 /** OAuth login, access, account identity, and refresh operations. */
+export interface OAuthLoginOptions {
+	registration?: { kind: "new" } | { kind: "existing"; registrationId: string };
+	intent?: "connect" | "reconnect" | "enablePlanUsage";
+}
+
+/** Public registration metadata: deliberately excludes every token and nonce. */
+export interface OAuthRegistrationSummary {
+	registrationId: string;
+	provider: string;
+	clientId: string;
+	issuer: string;
+	subject: string;
+	email?: string;
+	label: string;
+	status: "signed_in" | "signed_out" | "reauth_required" | "signing_out";
+	planAccess: "enabled" | "disabled";
+	credentialId?: number;
+}
+
 export interface OAuthApi {
 	/**
 	 * Login to an OAuth provider. Resolves with the stored credential's
@@ -1107,7 +1146,9 @@ export interface OAuthApi {
 	 * surface which account — and for Anthropic, which organization — the
 	 * login registered.
 	 */
-	login(provider: OAuthProviderId, ctrl: OAuthLoginController): Promise<OAuthLoginIdentity | undefined>;
+	login(provider: OAuthProviderId, ctrl: OAuthLoginController, options?: OAuthLoginOptions): Promise<OAuthLoginIdentity | undefined>;
+	registrations(provider: string): OAuthRegistrationSummary[];
+	logoutRegistration(provider: string, registrationId: string, signal?: AbortSignal): Promise<{ remoteRevoked: boolean }>;
 	/**
 	 * Resolve the OAuth credential for `provider`, refreshing through the same
 	 * pipeline as {@link AuthStorage.keys.get} but returning the refreshed

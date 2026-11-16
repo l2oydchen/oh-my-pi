@@ -171,6 +171,12 @@ function answers(message: AssistantMessage, model: Model<Api>): boolean {
  * `max_tokens`; lowering the cap can change that budget and the cache key.
  */
 export function isReplayable(model: Model<Api>, options: SimpleStreamOptions | undefined): boolean {
+	const compat = model.compat;
+	if (compat && "responsesRequestContract" in compat && compat.responsesRequestContract === "chatgpt") {
+		// This refresh relies on maxTokens: 1. The ChatGPT plan route rejects
+		// that cap, so do not schedule an unbounded background generation.
+		return false;
+	}
 	if (model.api === "anthropic-messages") {
 		const reasoningRequested = model.reasoning && options?.reasoning !== undefined && !options.forceReasoningOff;
 		return !reasoningRequested || model.thinking?.mode === "anthropic-adaptive";

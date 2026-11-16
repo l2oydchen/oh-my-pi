@@ -34,6 +34,7 @@ export interface ChatRecord {
 	readonly cacheWriteTokens: number;
 	readonly reasoningOutputTokens: number;
 	readonly totalTokens: number;
+	readonly hasUnpricedUsage?: boolean;
 	readonly costUsd: number | undefined;
 	readonly costUnavailableReason: string | undefined;
 	readonly errorType: string | undefined;
@@ -91,6 +92,7 @@ export interface AgentRunSummary {
 		readonly cacheWriteTokens: number;
 		readonly reasoningOutputTokens: number;
 		readonly totalTokens: number;
+		readonly hasUnpricedUsage?: boolean;
 	};
 	readonly cost: {
 		readonly estimatedUsd: number;
@@ -229,6 +231,7 @@ export class AgentRunCollector {
 			reasoningOutputTokens,
 			totalTokens,
 			costUsd: fields.costUsd,
+			...(usage?.hasUnpricedUsage ? { hasUnpricedUsage: true } : undefined),
 			costUnavailableReason: fields.costUnavailableReason,
 			errorType: message.stopReason === "error" || message.stopReason === "aborted" ? message.stopReason : undefined,
 		});
@@ -321,6 +324,7 @@ export class AgentRunCollector {
 		let cacheWriteTokens = 0;
 		let reasoningOutputTokens = 0;
 		let totalTokens = 0;
+		let hasUnpricedUsage = false;
 		let estimatedUsd = 0;
 		const unavailableReasons = new Set<string>();
 		const errorsByType: Record<string, number> = {};
@@ -333,6 +337,7 @@ export class AgentRunCollector {
 			cacheWriteTokens += chat.cacheWriteTokens;
 			reasoningOutputTokens += chat.reasoningOutputTokens;
 			totalTokens += chat.totalTokens;
+			hasUnpricedUsage ||= chat.hasUnpricedUsage === true;
 			if (chat.stopReason) byStopReason[chat.stopReason] = (byStopReason[chat.stopReason] ?? 0) + 1;
 			if (chat.costUsd != null) estimatedUsd += chat.costUsd;
 			if (chat.costUnavailableReason) unavailableReasons.add(chat.costUnavailableReason);
@@ -402,6 +407,7 @@ export class AgentRunCollector {
 				cacheWriteTokens,
 				reasoningOutputTokens,
 				totalTokens,
+				...(hasUnpricedUsage ? { hasUnpricedUsage: true } : undefined),
 			},
 			cost: {
 				estimatedUsd,
@@ -466,6 +472,7 @@ export function aggregateAgentRunSummaries(summaries: readonly AgentRunSummary[]
 	let cacheWriteTokens = 0;
 	let reasoningOutputTokens = 0;
 	let totalTokens = 0;
+	let hasUnpricedUsage = false;
 
 	let estimatedUsd = 0;
 	const unavailableReasons = new Set<string>();
@@ -511,6 +518,7 @@ export function aggregateAgentRunSummaries(summaries: readonly AgentRunSummary[]
 		cacheWriteTokens += s.usage.cacheWriteTokens;
 		reasoningOutputTokens += s.usage.reasoningOutputTokens;
 		totalTokens += s.usage.totalTokens;
+		hasUnpricedUsage ||= s.usage.hasUnpricedUsage === true;
 
 		estimatedUsd += s.cost.estimatedUsd;
 		for (const r of s.cost.unavailableReasons) unavailableReasons.add(r);
@@ -535,7 +543,15 @@ export function aggregateAgentRunSummaries(summaries: readonly AgentRunSummary[]
 			totalLatencyMs: toolLatency,
 			byName: sortedRecord(byName),
 		},
-		usage: { inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens, reasoningOutputTokens, totalTokens },
+		usage: {
+			inputTokens,
+			outputTokens,
+			cachedInputTokens,
+			cacheWriteTokens,
+			reasoningOutputTokens,
+			totalTokens,
+			...(hasUnpricedUsage ? { hasUnpricedUsage: true } : undefined),
+		},
 		cost: { estimatedUsd, unavailableReasons: [...unavailableReasons].sort() },
 		errors: { total: errorsTotal, byType: sortedRecord(errorsByType) },
 		stepCount,

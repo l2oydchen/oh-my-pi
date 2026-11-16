@@ -1,0 +1,9 @@
+auth "openai-chatgpt" {
+	name "OpenAI (Sign in with ChatGPT)"
+	registration-login #true
+	oauth-only #true
+	local-only #true
+	allow-quota-rotation #false
+	login "custom" hook="openai-chatgpt"
+	refresh hook="openai-chatgpt"
+}

@@ -8,6 +8,7 @@
 
 ### Added
 
+- Added Sign in with ChatGPT to the existing login, logout, account selection, and model-role flows, including reviewer tasks and API-model switching.
 - Bash redirects now write every writable internal URL, not just `local://` and `out://`: `: > proc://<id>/kill` cancels a job, and `agent://`, `cfg://`, `ssh://`, `xd://`, and other handler-written URLs take redirected text like the `write` tool, with the handler's answer shown in the result
 
 ### Changed
@@ -17,6 +18,7 @@
 
 ### Fixed
 
+- Preserved unpriced ChatGPT plan usage in session and task totals without changing known API cost subtotals.
 - The agent no longer reports itself idle (program status, terminal title, registry status) while a subagent or background job it is waiting on can still resume it; the run ends only once nothing can wake it, including a child agent that finishes without replying
 - Subagents and security scans no longer finish while a child agent they started is still running or a peer message is queued for them: a subagent's `yield` waits until nothing can wake its run, as it already did for its background jobs
 

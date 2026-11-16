@@ -7,6 +7,7 @@
 
 import type { Api, ApiKey, AssistantMessage, Context, Model, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
 import { resolveCatalogPolicy } from "@oh-my-pi/pi-catalog/compat/catalog-policy";
+import { supportsOutputTokenLimit } from "@oh-my-pi/pi-catalog/compat/output-limits";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { prompt } from "@oh-my-pi/pi-utils";
 import * as snapcompact from "@oh-my-pi/snapcompact";
@@ -366,7 +367,7 @@ export async function generateBranchSummary(
 		response = await instrumentedCompleteSimple(
 			model,
 			{ systemPrompt: [SUMMARIZATION_SYSTEM_PROMPT], messages: summarizationMessages },
-			{ apiKey, signal, maxTokens: 2048, metadata },
+			{ apiKey, signal, maxTokens: supportsOutputTokenLimit(model) ? 2048 : undefined, metadata },
 			{ telemetry: options.telemetry, oneshotKind: "branch_summary", completeImpl: options.completeImpl, retry: {} },
 		);
 	} catch (error) {

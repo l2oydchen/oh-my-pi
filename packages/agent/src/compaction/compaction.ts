@@ -33,6 +33,7 @@ import { buildResponsesInput, resolveOpenAICompatPolicy } from "@oh-my-pi/pi-ai/
 import { isSurvivingAssistant } from "@oh-my-pi/pi-ai/providers/transform-messages";
 import { stripOpenAIResponsesOutputOnlyStatusesForReplay } from "@oh-my-pi/pi-ai/utils";
 import { resolveCatalogPolicy } from "@oh-my-pi/pi-catalog/compat/catalog-policy";
+import { supportsOutputTokenLimit } from "@oh-my-pi/pi-catalog/compat/output-limits";
 import { preferredDialect } from "@oh-my-pi/pi-catalog/identity";
 import { clampThinkingLevelForModel } from "@oh-my-pi/pi-catalog/model-thinking";
 import { isRecord, logger, prompt, withLoopPhase } from "@oh-my-pi/pi-utils";
@@ -1058,7 +1059,7 @@ async function summarizeConversationWindow(
 		model,
 		{ systemPrompt: [SUMMARIZATION_SYSTEM_PROMPT], messages: summarizationMessages },
 		{
-			maxTokens,
+			maxTokens: supportsOutputTokenLimit(model) ? maxTokens : undefined,
 			signal,
 			apiKey,
 			reasoning: resolveCompactionEffort(model, options?.thinkingLevel),

@@ -33,6 +33,49 @@ const ZERO_USAGE: Usage = {
 };
 
 describe("branch summarization", () => {
+	test("omits its internal output cap for ChatGPT while preserving the existing API cap", async () => {
+		const chatgpt = buildModel({
+			...MODEL,
+			id: "gpt-5.5",
+			api: "openai-responses",
+			provider: "openai-chatgpt",
+			providerType: "openai-chatgpt",
+			baseUrl: "https://api.openai.com/v1",
+		});
+		const entries: SessionEntry[] = [
+			{
+				type: "message",
+				id: "user-1",
+				parentId: null,
+				timestamp: new Date(0).toISOString(),
+				message: { role: "user", content: "Summarize this branch.", timestamp: 0 },
+			},
+		];
+		for (const model of [chatgpt, MODEL]) {
+			const caps: Array<number | undefined> = [];
+			const result = await generateBranchSummary(entries, {
+				model,
+				apiKey: "test-key",
+				signal: new AbortController().signal,
+				completeImpl: async (calledModel, _context, options) => {
+					caps.push(options?.maxTokens);
+					return {
+						role: "assistant",
+						content: [{ type: "text", text: "summary" }],
+						api: calledModel.api,
+						provider: calledModel.provider,
+						model: calledModel.id,
+						usage: ZERO_USAGE,
+						stopReason: "stop",
+						timestamp: 1,
+					};
+				},
+			});
+			expect(result.summary).toBe("summary");
+			expect(caps).toEqual([model === chatgpt ? undefined : 2048]);
+		}
+	});
+
 	test("includes informative tool results and drops useless ones", async () => {
 		const entries: SessionEntry[] = [
 			{

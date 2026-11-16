@@ -15,6 +15,7 @@ import type { ModelManagerOptions } from "../model-manager";
 import type { ModelManagerConfig, ProviderDescriptor } from "./descriptor-types";
 import { googleModelManagerOptions, googleVertexModelManagerOptions } from "./google";
 import { ollamaCloudModelManagerOptions } from "./ollama";
+import { openaiChatGPTModelManagerOptions } from "./openai-chatgpt";
 import {
 	abliterationModelManagerOptions,
 	aiandModelManagerOptions,
@@ -153,6 +154,7 @@ const MODEL_MANAGER_FACTORIES: Readonly<Partial<Record<KnownProvider, ModelManag
 	ollama: config => ollamaModelManagerOptions(config),
 	"ollama-cloud": config => ollamaCloudModelManagerOptions(config),
 	openai: config => openaiModelManagerOptions(config),
+	"openai-chatgpt": config => openaiChatGPTModelManagerOptions(config),
 	"opencode-go": config => opencodeGoModelManagerOptions(config),
 	"opencode-zen": config => opencodeZenModelManagerOptions(config),
 	openrouter: config => openrouterModelManagerOptions(config),

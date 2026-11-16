@@ -3,9 +3,11 @@
  * whose flow is not expressible in the declarative grammar.
  */
 import { loginMistralVibeSignIn } from "../oauth/mistral-vibe";
+import { loginOpenAIChatGPT, refreshOpenAIChatGPT } from "../oauth/openai-chatgpt";
 import type { Lazy, LoginHook, RefreshHook } from "./types";
 
 export const CUSTOM_LOGIN_HOOKS: Record<string, Lazy<LoginHook>> = {
+	"openai-chatgpt": async () => loginOpenAIChatGPT,
 	"github-copilot": () => import("../oauth/github-copilot").then(module => module.loginGitHubCopilotHook),
 	cursor: () => import("../oauth/cursor").then(module => module.loginCursorHook),
 	perplexity: () => import("../oauth/perplexity").then(module => module.loginPerplexity),
@@ -16,6 +18,7 @@ export const CUSTOM_LOGIN_HOOKS: Record<string, Lazy<LoginHook>> = {
 	"antigravity-cli": () => import("../oauth/antigravity-cli").then(module => module.loginAntigravityCli),
 };
 export const CUSTOM_REFRESH_HOOKS: Record<string, Lazy<RefreshHook>> = {
+	"openai-chatgpt": async () => refreshOpenAIChatGPT,
 	"github-copilot": () => import("../oauth/github-copilot").then(module => module.refreshGitHubCopilotHook),
 	cursor: () => import("../oauth/cursor").then(module => module.refreshCursorHook),
 	snowflake: () => import("../oauth/snowflake").then(module => module.refreshSnowflakeToken),

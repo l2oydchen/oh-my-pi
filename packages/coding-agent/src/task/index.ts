@@ -125,6 +125,7 @@ function addUsageTotals(target: Usage, usage: Partial<Usage>): void {
 	target.cost.cacheRead += cost.cacheRead;
 	target.cost.cacheWrite += cost.cacheWrite;
 	target.cost.total += cost.total;
+	if (usage.hasUnpricedUsage) target.hasUnpricedUsage = true;
 }
 
 // Re-export types and utilities

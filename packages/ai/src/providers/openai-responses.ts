@@ -62,6 +62,13 @@ import {
 } from "../utils/tool-choice";
 import { compactGrammarDefinition } from "./grammar";
 import {
+	applyOpenAIChatGPTRequestContract,
+	omitOpenAIChatGPTGeneratedFields,
+	validateOpenAIChatGPTOptions,
+	validateOpenAIChatGPTOverrides,
+	validateOpenAIChatGPTRequestSetup,
+} from "./openai-chatgpt-contract";
+import {
 	type OpenAIEffortControlState,
 	planStableOpenAIEffort,
 	releaseOpenAIEffortControlSession,
@@ -548,6 +555,9 @@ function isOpenAIResponsesStatefulEnabled(
 	options: OpenAIResponsesOptions | undefined,
 	model: Model<"openai-responses">,
 ): boolean {
+	// ChatGPT plan usage has no persistent HTTP response storage. Disable the
+	// delta path before history is sliced, including explicit/env opt-ins.
+	if (model.compat.responsesRequestContract === "chatgpt") return false;
 	// Chaining forces `store: true`, so a storing host whose storage is off
 	// must never chain — not even when the caller asks for it.
 	if (model.compat.storeResponses === true && !storesResponsesServerSide(model, options)) return false;
@@ -754,6 +764,7 @@ const streamOpenAIResponsesOnce = (
 		let firstTokenTime: number | undefined;
 
 		const output: AssistantMessage = createInitialResponsesAssistantMessage(model.api, model.provider, model.id);
+		if (model.compat.responsesRequestContract === "chatgpt") output.usage.hasUnpricedUsage = true;
 		let rawRequestDump: RawHttpRequestDump | undefined;
 		let chainState: OpenAIResponsesChainState | undefined;
 		let sentPreviousResponseId: string | undefined;
@@ -790,7 +801,14 @@ const streamOpenAIResponsesOnce = (
 			// avoid perturbing provider conversation state without cold-starting the cache.
 			const routingSessionId = getOpenAIResponsesRoutingSessionId(options);
 			const promptCacheSessionId = getOpenAIPromptCacheKey(options);
-			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
+			const chatGPTRequestContract = model.compat.responsesRequestContract === "chatgpt";
+			if (chatGPTRequestContract && !options?.apiKey?.trim()) {
+				throw new AIError.MissingApiKeyError(
+					model.provider,
+					"Sign in with ChatGPT requires an explicitly resolved OAuth access token. Log in to this provider first.",
+				);
+			}
+			const apiKey = options?.apiKey || (chatGPTRequestContract ? "" : getEnvApiKey(model.provider)) || "";
 			const { headers, copilotPremiumRequests, baseUrl, copilotCacheKey, copilotCacheSnapshot } =
 				resolveOpenAIRequestSetup(model, {
 					apiKey,
@@ -803,6 +821,7 @@ const streamOpenAIResponsesOnce = (
 					// identity; the sessionId-derived cache-id fallback never does.
 					promptCacheAffinityKey: options?.promptCacheKey ? promptCacheSessionId : undefined,
 				});
+			if (chatGPTRequestContract) validateOpenAIChatGPTRequestSetup(apiKey, baseUrl, headers);
 			const premiumRequestsTotal = copilotPremiumRequests;
 			const providerSessionState = getOpenAIResponsesProviderSessionState(model, options?.providerSessionState);
 			const resolvedBaseUrl = (baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "");
@@ -880,6 +899,7 @@ const streamOpenAIResponsesOnce = (
 				const replacementPayload = await options?.onPayload?.(requestParams, model);
 				const payload =
 					replacementPayload !== undefined ? (replacementPayload as OpenAIResponsesSamplingParams) : requestParams;
+				if (chatGPTRequestContract) applyOpenAIChatGPTRequestContract(payload);
 				applyReasoningEffortFallbackForRequest(payload);
 				return payload;
 			};
@@ -972,6 +992,10 @@ const streamOpenAIResponsesOnce = (
 			const openResponsesStream = async (
 				requestParams: OpenAIResponsesSamplingParams,
 			): Promise<AsyncIterable<ResponseStreamEvent>> => {
+				// Hooks and retry transforms have all run. Revalidate at the sender so
+				// neither a replacement payload nor an in-place mutation bypasses the
+				// plan route's contract. WS connection-owned anchors are added later.
+				if (chatGPTRequestContract) applyOpenAIChatGPTRequestContract(requestParams);
 				activeReasoningEffortFallbackKey = createOpenAIReasoningEffortFallbackKey(
 					"responses",
 					resolvedBaseUrl,
@@ -1474,6 +1498,7 @@ const streamOpenAIResponsesOnce = (
 					output.stopDetails = undefined;
 					output.providerPayload = undefined;
 					output.usage = retryOutput.usage;
+					if (chatGPTRequestContract) output.usage.hasUnpricedUsage = true;
 					if (premiumRequestsTotal !== undefined) output.usage.premiumRequests = premiumRequestsTotal;
 					output.stopReason = "stop";
 					output.duration = undefined;
@@ -1830,6 +1855,8 @@ export function buildParams(
 	strictToolsApplied: boolean;
 	toolNamesByWire: ReadonlyMap<string, string> | undefined;
 } {
+	const chatGPTRequestContract = model.compat.responsesRequestContract === "chatgpt";
+	if (chatGPTRequestContract) validateOpenAIChatGPTOptions(options);
 	const policy = resolveOpenAICompatPolicy(model, {
 		endpoint: "responses",
 		reasoning: options?.reasoning,
@@ -2013,6 +2040,10 @@ export function buildParams(
 		applyOpenAIGatewayRouting(params, model.compat);
 	}
 
+	if (chatGPTRequestContract) {
+		omitOpenAIChatGPTGeneratedFields(params);
+		if (options?.extraBody) validateOpenAIChatGPTOverrides(options.extraBody, "extraBody");
+	}
 	applyOpenAIExtraBody(params, options?.extraBody);
 	applyOpenAIResponsesPromptCachePolicy(params, model, options, statefulCacheBaseline);
 
@@ -2027,6 +2058,7 @@ export function buildParams(
 		trailingScaffoldingItems = 1;
 	}
 
+	if (chatGPTRequestContract) applyOpenAIChatGPTRequestContract(params);
 	return { params, trailingScaffoldingItems, strictToolsApplied, toolNamesByWire: wireToolNames };
 }
 

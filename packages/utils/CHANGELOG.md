@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added a strict persistent install identifier for authentication registrations that cannot use a temporary fallback identity.
+
 ## [18.20.3] - 2026-11-16
 
 ### Fixed

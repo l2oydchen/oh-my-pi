@@ -8,7 +8,7 @@ import type { FooterHost, FooterSession } from "./host";
 import { shortenPath } from "../render/render-utils";
 import { sanitizeStatusText } from "../chrome/shared";
 import { formatMetric } from "../components/metric";
-import { formatBillingSummary } from "./metrics";
+import { formatBillingSummary, isUsingChatGPTPlan } from "./metrics";
 import {
 	formatContextUsage,
 	getContextUsageLevel,
@@ -179,7 +179,7 @@ export class FooterComponent implements Component {
 		// Cumulative usage: the session manager's running rollup spans every entry
 		// in the session (so it survives compaction) and already folds in the usage
 		// completed `task` tool results carry, which is where subagent spend lands.
-		const { input, output, cacheRead, cacheWrite, cost, premiumRequests } =
+		const { input, output, cacheRead, cacheWrite, cost, premiumRequests, hasUnpricedUsage } =
 			this.session.sessionManager.getUsageStatistics();
 		const segs: NativeNode[] = [];
 		const seg = (key: string, props: TspProps<"seg">): void => {
@@ -199,7 +199,17 @@ export class FooterComponent implements Component {
 			if (amount) seg(key, { side: "left", priority: 1, spans: [span(`${glyph}${formatNumber(amount)}`, "dim")] });
 		}
 		const usingSubscription = state.model ? this.session.modelRegistry.isUsingSubscription(state.model) : false;
-		const billing = formatBillingSummary({ cost, usingSubscription, premiumRequests, fractionDigits: 3 }, theme);
+		const billing = formatBillingSummary(
+			{
+				cost,
+				usingSubscription,
+				usingChatGPTPlan: isUsingChatGPTPlan(state.model),
+				hasUnpricedUsage,
+				premiumRequests,
+				fractionDigits: 3,
+			},
+			theme,
+		);
 		if (billing) seg("cost", { side: "left", priority: 3, spans: [span(billing, "dim")] });
 		const contextUsage = this.session.getContextUsage();
 		const contextWindow = contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0;
@@ -256,6 +266,7 @@ export class FooterComponent implements Component {
 			cacheWrite: totalCacheWrite,
 			cost: totalCost,
 			premiumRequests: totalPremiumRequests,
+			hasUnpricedUsage,
 		} = this.session.sessionManager.getUsageStatistics();
 		// Calculate context usage from session (handles compaction correctly).
 		// After compaction, tokens are unknown until the next LLM response.
@@ -305,7 +316,14 @@ export class FooterComponent implements Component {
 		const usingSubscription = state.model ? this.session.modelRegistry.isUsingSubscription(state.model) : false;
 		const { auto: autoIcon } = theme.icon;
 		const billing = formatBillingSummary(
-			{ cost: totalCost, usingSubscription, premiumRequests: totalPremiumRequests, fractionDigits: 3 },
+			{
+				cost: totalCost,
+				usingSubscription,
+				usingChatGPTPlan: isUsingChatGPTPlan(state.model),
+				hasUnpricedUsage,
+				premiumRequests: totalPremiumRequests,
+				fractionDigits: 3,
+			},
 			theme,
 		);
 		if (billing) statsParts.push(billing);

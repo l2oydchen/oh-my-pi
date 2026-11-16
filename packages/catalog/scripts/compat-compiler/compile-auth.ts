@@ -729,6 +729,18 @@ function provider(node: KdlNodeView): CompiledAuthProvider {
 			case "allows-missing-api-key":
 				result.allowsMissingApiKey = singleBool(child);
 				break;
+			case "registration-login":
+				result.registrationLogin = singleBool(child);
+				break;
+			case "oauth-only":
+				result.oauthOnly = singleBool(child);
+				break;
+			case "local-only":
+				result.localOnly = singleBool(child);
+				break;
+			case "allow-quota-rotation":
+				result.allowQuotaRotation = singleBool(child);
+				break;
 			case "org-scoped-identity":
 				result.orgScopedIdentity = singleBool(child);
 				break;

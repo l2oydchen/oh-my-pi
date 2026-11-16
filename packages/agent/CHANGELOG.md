@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserved the unpriced-usage indicator in chat telemetry and aggregated run summaries.
+- Kept internal summary and output-fitting defaults from adding unsupported output caps to ChatGPT plan requests.
+
 ## [18.20.1] - 2026-11-14
 
 ### Fixed

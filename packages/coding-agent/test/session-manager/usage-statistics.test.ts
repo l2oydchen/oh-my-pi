@@ -5,6 +5,62 @@ import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manage
 import { TempDir } from "@oh-my-pi/pi-utils";
 
 describe("SessionManager usage statistics", () => {
+	it("preserves unpriced subagent usage alongside known API spend after saving and reopening", async () => {
+		await using temp = await TempDir.create("@omp-unpriced-usage-");
+		const session = SessionManager.create(temp.path(), temp.path());
+		session.appendMessage({ role: "user", content: "Review", timestamp: 1 });
+		session.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "Requested review" }],
+			api: "openai-responses",
+			provider: "openai",
+			model: "gpt-5.5",
+			stopReason: "stop",
+			timestamp: 2,
+			usage: {
+				input: 10,
+				output: 5,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 15,
+				cost: { input: 0.25, output: 0.5, cacheRead: 0, cacheWrite: 0, total: 0.75 },
+			},
+		});
+		session.appendMessage({
+			role: "toolResult",
+			toolCallId: "review-task",
+			toolName: "task",
+			content: [{ type: "text", text: "Reviewed" }],
+			isError: false,
+			timestamp: 3,
+			details: {
+				usage: {
+					input: 20,
+					output: 3,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 23,
+					hasUnpricedUsage: true,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+			},
+		});
+		expect(session.getUsageStatistics()).toMatchObject({ totalTokens: 38, cost: 0.75, hasUnpricedUsage: true });
+		await session.flush();
+		const sessionFile = session.getSessionFile();
+		if (!sessionFile) throw new Error("Expected saved session");
+		await session.close();
+		const reopened = await SessionManager.open(sessionFile, undefined, undefined, {
+			initialCwd: temp.path(),
+			suppressBreadcrumb: true,
+		});
+		try {
+			expect(reopened.getUsageStatistics()).toMatchObject({ totalTokens: 38, cost: 0.75, hasUnpricedUsage: true });
+		} finally {
+			await reopened.close();
+		}
+	});
+
 	const modelUsage = {
 		purpose: "auto-thinking",
 		role: "smol",

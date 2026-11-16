@@ -47,10 +47,19 @@ export async function runLoginCommand(provider: string | undefined): Promise<voi
 		// A provider-scoped online refresh re-runs discovery with the new
 		// credential; a fresh cache row fetched before login would otherwise hide
 		// the unlocked models until its TTL expires (#5780).
-		await modelRegistry.refreshProvider(info.storeCredentialsAs ?? info.id, "online");
+		if (identity.planAccess !== "disabled") {
+			await modelRegistry.refreshProvider(info.storeCredentialsAs ?? info.id, "online");
+		}
 
 		const who = formatLoginIdentity(identity);
 		process.stdout.write(chalk.green(`\nLogged in to ${info.name}${who ? ` as ${who}` : ""}\n`));
+		if (identity.planAccess === "disabled") {
+			process.stdout.write(
+				chalk.yellow("ChatGPT plan usage is not enabled. Log in again to authorize it, or select an API model.\n"),
+			);
+		} else if (identity.planAccess === "enabled") {
+			process.stdout.write("Using ChatGPT plan and credits. Manage usage: https://chatgpt.com/settings/usage\n");
+		}
 		const broker = await resolveAuthBrokerConfig();
 		process.stdout.write(
 			chalk.dim(

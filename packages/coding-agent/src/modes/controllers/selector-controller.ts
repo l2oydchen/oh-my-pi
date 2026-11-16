@@ -1,7 +1,8 @@
 import { type AgentMessage, type AgentToolResult, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
-import type { ImageContent, Model, UsageReport } from "@oh-my-pi/pi-ai";
+import type { ImageContent, Model, OAuthLoginOptions, UsageReport } from "@oh-my-pi/pi-ai";
 import type { OAuthProvider } from "@oh-my-pi/pi-ai/oauth/types";
+import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
 import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import type { Component, OverlayHandle } from "@oh-my-pi/pi-tui";
 import { Loader, Spacer, Text } from "@oh-my-pi/pi-tui";
@@ -26,6 +27,7 @@ import { reset as resetCapabilities } from "../../capability";
 import type { AdvisorConfigScope } from "@oh-my-pi/pi-tui/overlays/advisor-config";
 import { showGitOverlay } from "../../cli/git-tui";
 import { formatLoginIdentity } from "../../cli/oauth-terminal";
+import { oauthRegistrationLoginChoices } from "../../session/oauth-registration-choices";
 import {
 	acquireModelRoleMutation,
 	applyModelPreset,
@@ -68,7 +70,7 @@ import { findSessionContinuation, readSessionInfo, type SessionInfo } from "../.
 import { SessionManager } from "../../session/session-manager";
 import { loadPinnedSessionIds, setSessionPinned } from "../../session/session-pins";
 import { FileSessionStorage } from "../../session/session-storage";
-import { listLogoutAccounts, logoutCredential } from "../../slash-commands/helpers/logout";
+import { listLogoutAccounts, logoutCredential, logoutRegistration } from "../../slash-commands/helpers/logout";
 import type { LogoutAccount } from "@oh-my-pi/pi-tui/overlays/logout-account-selector";
 import { describeRedeemOutcome, toResetUsageAccounts } from "../../slash-commands/helpers/reset-usage";
 import { toSessionPinAccounts } from "../../slash-commands/helpers/session-pin";
@@ -2169,9 +2171,32 @@ export class SelectorController {
 	 * credentials were stored.
 	 */
 	async #handleOAuthLogin(providerId: string): Promise<boolean> {
-		this.ctx.showStatus(`Logging in to ${providerId}…`);
 		const { getOAuthCredentialProvider, LoginDialogComponent, PASTE_CODE_LOGIN_PROVIDERS } =
 			await loadProviderAuthUi();
+		const authStorage = this.ctx.session.modelRegistry.authStorage;
+		let loginOptions: OAuthLoginOptions | undefined;
+		if (authPolicyFor(providerId)?.registrationLogin) {
+			try {
+				await authStorage.credentials.reload();
+				const choices = oauthRegistrationLoginChoices(
+					authStorage.oauth.registrations(getOAuthCredentialProvider(providerId)),
+				);
+				const selected =
+					choices.length === 1
+						? choices[0].label
+						: await this.ctx.showHookSelector("Choose an account to sign in", choices.map(choice => choice.label));
+				if (selected === undefined) {
+					this.ctx.showStatus("Login cancelled");
+					return false;
+				}
+				loginOptions = choices.find(choice => choice.label === selected)?.options;
+				if (!loginOptions) return false;
+			} catch (error) {
+				this.ctx.showError(`Could not load saved accounts: ${error instanceof Error ? error.message : String(error)}`);
+				return false;
+			}
+		}
+		this.ctx.showStatus(`Logging in to ${providerId}…`);
 		const useManualInput = PASTE_CODE_LOGIN_PROVIDERS.has(providerId);
 		let restored = false;
 		const restoreEditor = () => {
@@ -2198,7 +2223,7 @@ export class SelectorController {
 		this.ctx.ui.setFocus(dialog);
 		this.ctx.ui.requestRender();
 		try {
-			const identity = await this.ctx.session.modelRegistry.authStorage.oauth.login(providerId as OAuthProvider, {
+			const identity = await authStorage.oauth.login(providerId as OAuthProvider, {
 				signal: dialog.signal,
 				onBrowserSession: captureBrowserSession,
 				onAuth: (info: { url: string; launchUrl?: string; instructions?: string }) => {
@@ -2223,7 +2248,7 @@ export class SelectorController {
 								signal,
 							)
 					: undefined,
-			});
+			}, loginOptions);
 			// Scope the post-login refresh to the just-authenticated provider with an
 			// `online` strategy: the default all-provider `online-if-uncached` reuses
 			// a fresh authoritative cache row (e.g. an empty result fetched before
@@ -2231,7 +2256,9 @@ export class SelectorController {
 			// models would stay unavailable in-session (#5780). Unrelated providers
 			// are left untouched. `refreshProvider` swallows discovery failures, so
 			// awaiting cannot reject the login.
-			await this.ctx.session.modelRegistry.refreshProvider(getOAuthCredentialProvider(providerId), "online");
+			if (identity?.planAccess !== "disabled") {
+				await this.ctx.session.modelRegistry.refreshProvider(getOAuthCredentialProvider(providerId), "online");
+			}
 			await this.ctx.session.refreshScopedModels();
 			const block = new TranscriptBlock();
 			// Name the account (and Anthropic organization) that was stored so a
@@ -2249,6 +2276,19 @@ export class SelectorController {
 				),
 			);
 			block.addChild(new Text(theme.fg("dim", `Credentials saved to ${getAgentDbPath()}`), 1, 0));
+			if (identity?.planAccess === "disabled") {
+				block.addChild(
+					new Text(
+						theme.fg("warning", "ChatGPT plan usage is not enabled. Use /login to authorize it, or select an API model."),
+						1,
+						0,
+					),
+				);
+			} else if (identity?.planAccess === "enabled") {
+				block.addChild(
+					new Text("Using ChatGPT plan and credits. Manage usage: https://chatgpt.com/settings/usage", 1, 0),
+				);
+			}
 			this.ctx.present(block);
 			return true;
 		} catch (error: unknown) {
@@ -2265,12 +2305,14 @@ export class SelectorController {
 	}
 
 	async #handleCredentialLogout(providerId: string, account: LogoutAccount): Promise<void> {
+		if (account.registrationId !== undefined) this.ctx.showStatus(`Signing out ${account.label}…`);
 		try {
-			const { removed, remainingSource } = await logoutCredential(
-				this.ctx.session,
-				providerId,
-				account.credentialId,
-			);
+			const result =
+				account.registrationId !== undefined
+					? await logoutRegistration(this.ctx.session, providerId, account.registrationId)
+					: await logoutCredential(this.ctx.session, providerId, account.credentialId);
+			const { removed, remainingSource } = result;
+			const remoteRevocationPending = result.remoteRevoked === false;
 			if (!removed) {
 				this.ctx.showError(`Logout skipped: ${account.label} is no longer stored for ${providerId}.`);
 				return;
@@ -2280,14 +2322,28 @@ export class SelectorController {
 			block.addChild(
 				new Text(
 					theme.fg(
-						"success",
-						`${theme.status.success} Successfully logged out ${account.label} from ${providerId}`,
+						remoteRevocationPending ? "warning" : "success",
+						remoteRevocationPending
+							? `Signed out locally: ${account.label} from ${providerId}`
+							: `${theme.status.success} Successfully logged out ${account.label} from ${providerId}`,
 					),
 					1,
 					0,
 				),
 			);
 			block.addChild(new Text(theme.fg("dim", `Credential removed from ${getAgentDbPath()}`), 1, 0));
+			if (remoteRevocationPending) {
+				block.addChild(
+					new Text(
+						theme.fg(
+							"warning",
+							"Local credentials were cleared, but OpenAI could not confirm remote sign-out. Review connected apps in ChatGPT settings.",
+						),
+						1,
+						0,
+					),
+				);
+			}
 			if (remainingSource) {
 				block.addChild(
 					new Text(theme.fg("warning", `${providerId} is still authenticated via ${remainingSource}`), 1, 0),
@@ -2353,8 +2409,13 @@ export class SelectorController {
 		if (mode === "logout") {
 			await this.#refreshOAuthProviderAuthState();
 			const oauthProviders = getOAuthProviders();
-			const loggedInProviders = oauthProviders.filter(provider =>
-				this.ctx.session.modelRegistry.authStorage.credentials.has(provider.id),
+			const authStorage = this.ctx.session.modelRegistry.authStorage;
+			const loggedInProviders = oauthProviders.filter(
+				provider =>
+					authStorage.credentials.has(provider.id) ||
+					authStorage.oauth
+						.registrations(provider.storeCredentialsAs ?? provider.id)
+						.some(registration => registration.status !== "signed_out"),
 			);
 			if (loggedInProviders.length === 0) {
 				this.ctx.showStatus("No stored provider credentials to log out. Remove env or config auth at its source.");

@@ -1,6 +1,8 @@
 import { getOAuthCredentialProvider } from "@oh-my-pi/pi-ai/oauth";
+import type { OAuthRegistrationSummary } from "@oh-my-pi/pi-ai";
 import type { AgentSession } from "../../session/agent-session";
 import type { AuthStorage, OAuthAccountIdentity, StoredAuthCredential } from "../../session/auth-storage";
+import { formatOAuthRegistrationLabel } from "../../session/oauth-registration-choices";
 
 import type { LogoutAccount } from "@oh-my-pi/pi-tui/overlays/logout-account-selector";
 
@@ -51,6 +53,9 @@ function oauthMatchesActiveIdentity(
 ): boolean {
 	if (!activeIdentity || row.credential.type !== "oauth") return false;
 	const credential = row.credential;
+	if (activeIdentity.registrationId !== undefined || credential.registrationId !== undefined) {
+		return credential.registrationId !== undefined && credential.registrationId === activeIdentity.registrationId;
+	}
 	// The org GATES the base identity rather than replacing it: mismatched org
 	// presence or different orgs never match — an org-scoped active session
 	// must not preselect the bare-email legacy row, and a bare-email active
@@ -77,6 +82,24 @@ function oauthMatchesActiveIdentity(
 		(activeIdentity.accountId !== undefined && credential.accountId === activeIdentity.accountId) ||
 		(activeIdentity.projectId !== undefined && credential.projectId === activeIdentity.projectId)
 	);
+}
+
+/** Identity-only sign-ins have no inference credential row, but still need logout. */
+export function toLogoutRegistrationAccounts(
+	provider: string,
+	registrations: readonly OAuthRegistrationSummary[],
+	activeIdentity?: OAuthAccountIdentity,
+): LogoutAccount[] {
+	return registrations
+		.filter(registration => registration.status !== "signed_out")
+		.map(registration => ({
+			registrationId: registration.registrationId,
+			provider,
+			label: formatOAuthRegistrationLabel(registration),
+			detail: registration.planAccess === "disabled" ? "identity sign-in · plan usage disabled" : "ChatGPT plan usage",
+			type: "oauth",
+			active: activeIdentity?.registrationId === registration.registrationId,
+		}) satisfies LogoutAccount);
 }
 
 export function toLogoutAccounts(
@@ -114,10 +137,43 @@ export async function listLogoutAccounts(
 ): Promise<LogoutAccount[]> {
 	const provider = getOAuthCredentialProvider(loginProvider);
 	await authStorage.credentials.reload();
-	return toLogoutAccounts(provider, authStorage.credentials.list(provider), {
-		activeIdentity: authStorage.oauth.identity(provider, sessionId),
+	const activeIdentity = authStorage.oauth.identity(provider, sessionId);
+	const registrations = authStorage.oauth.registrations(provider);
+	const registeredIds = new Set(registrations.map(registration => registration.registrationId));
+	const credentials = authStorage.credentials.list(provider).filter(
+		row =>
+			row.credential.type !== "oauth" ||
+			row.credential.registrationId === undefined ||
+			!registeredIds.has(row.credential.registrationId),
+	);
+	const credentialsToLogout = toLogoutAccounts(provider, credentials, {
+		activeIdentity,
 		activeApiKey: authStorage.keys.source(provider)?.kind === "api_key",
 	});
+	return [...credentialsToLogout, ...toLogoutRegistrationAccounts(provider, registrations, activeIdentity)].sort(
+		(left, right) => {
+			if (left.active !== right.active) return left.active ? -1 : 1;
+			return left.label.localeCompare(right.label);
+		},
+	);
+}
+
+/** Revoke this registration and clear its local secrets before refreshing models. */
+export async function logoutRegistration(
+	session: Pick<AgentSession, "modelRegistry" | "sessionId" | "refreshScopedModels">,
+	loginProvider: string,
+	registrationId: string,
+): Promise<{ removed: boolean; remainingSource?: string; remoteRevoked?: boolean }> {
+	const provider = getOAuthCredentialProvider(loginProvider);
+	const modelRegistry = session.modelRegistry;
+	const authStorage = modelRegistry.authStorage;
+	await authStorage.credentials.reload();
+	const registration = authStorage.oauth.registrations(provider).find(item => item.registrationId === registrationId);
+	if (!registration || registration.status === "signed_out") return { removed: false };
+	const { remoteRevoked } = await authStorage.oauth.logoutRegistration(provider, registrationId);
+	await modelRegistry.refreshProvider(provider, "online");
+	await session.refreshScopedModels();
+	return { removed: true, remoteRevoked, remainingSource: authStorage.keys.describe(provider, session.sessionId) };
 }
 
 /**
@@ -129,12 +185,16 @@ export async function logoutCredential(
 	session: Pick<AgentSession, "modelRegistry" | "sessionId" | "refreshScopedModels">,
 	loginProvider: string,
 	credentialId: number,
-): Promise<{ removed: boolean; remainingSource?: string }> {
+): Promise<{ removed: boolean; remainingSource?: string; remoteRevoked?: boolean }> {
 	const provider = getOAuthCredentialProvider(loginProvider);
 	const modelRegistry = session.modelRegistry;
 	const authStorage = modelRegistry.authStorage;
 	// Reload so an id stored by another process is found, not reported missing.
 	await authStorage.credentials.reload();
+	const row = authStorage.credentials.list(provider).find(credential => credential.id === credentialId);
+	if (row?.credential.type === "oauth" && row.credential.registrationId !== undefined) {
+		return logoutRegistration(session, loginProvider, row.credential.registrationId);
+	}
 	if (!(await authStorage.credentials.removeById(provider, credentialId))) return { removed: false };
 	// Provider-scoped online refresh so the removed credential's stale
 	// endpoint/deployment models are invalidated deterministically; the

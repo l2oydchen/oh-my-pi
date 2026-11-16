@@ -416,6 +416,8 @@ export interface UsageStatistics {
 	orchestrationCacheRead: number;
 	premiumRequests: number;
 	cost: number;
+	/** The monetary total excludes usage without a reported dollar price. */
+	hasUnpricedUsage?: boolean;
 	/** Portion of {@link cost} carried by completed `task` results (direct children's spend). */
 	subagentCost: number;
 }

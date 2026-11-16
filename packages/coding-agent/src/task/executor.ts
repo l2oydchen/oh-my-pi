@@ -2245,6 +2245,15 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 				// Extract and accumulate usage (prefer message.usage, fallback to event.usage)
 				const eventUsage = isRecord(event) && "usage" in event ? event.usage : undefined;
 				const messageUsage = getMessageUsage(event.message) || eventUsage;
+				// Descendant task spend is tracked separately, but its unpriced
+				// attribution must survive the enclosing task's result as well.
+				if (role === "toolResult" && isRecord(event.message) && event.message.toolName === "task") {
+					const details = event.message.details;
+					if (isRecord(details) && isRecord(details.usage) && details.usage.hasUnpricedUsage === true) {
+						accumulatedUsage.hasUnpricedUsage = true;
+						hasUsage = true;
+					}
+				}
 				if (isRecord(messageUsage)) {
 					// Only count assistant messages (not tool results, etc.)
 					if (role === "assistant") {
@@ -2255,6 +2264,7 @@ function createSubagentRunMonitor(args: RunMonitorArgs): SubagentRunMonitor {
 						accumulatedUsage.cacheRead += getNumberField(messageUsage, "cacheRead") ?? 0;
 						accumulatedUsage.cacheWrite += getNumberField(messageUsage, "cacheWrite") ?? 0;
 						accumulatedUsage.totalTokens += getNumberField(messageUsage, "totalTokens") ?? 0;
+						if (messageUsage.hasUnpricedUsage === true) accumulatedUsage.hasUnpricedUsage = true;
 						accumulatedUsage.reasoningTokens =
 							(accumulatedUsage.reasoningTokens ?? 0) + (getNumberField(messageUsage, "reasoningTokens") ?? 0);
 						if (costRecord) {

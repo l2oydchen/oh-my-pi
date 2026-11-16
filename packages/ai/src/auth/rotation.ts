@@ -1,4 +1,5 @@
 import { scheduler } from "node:timers/promises";
+import { authPolicyFor } from "@oh-my-pi/pi-catalog/compat/auth";
 import * as AIError from "../error";
 import { isUsageLimitOutcome } from "../error/rate-limit";
 import { extractProviderRetryHint } from "../utils/retry-after";
@@ -291,6 +292,9 @@ export class RateLimits implements LimitsApi {
 		sessionId: string | undefined,
 		options?: MarkUsageLimitOptions,
 	): Promise<UsageLimitMarkResult> {
+		// Keep the selected account and normal request backoff. A quota block would
+		// make the next resolver silently choose a sibling even if rotate returned false.
+		if (authPolicyFor(provider)?.allowQuotaRotation === false) return { switched: false };
 		await this.#deps.pool.adoptExternalChanges();
 		const sessionCredential = await this.#resolveCredentialTarget(provider, sessionId, {
 			credentialId: options?.credentialId,
