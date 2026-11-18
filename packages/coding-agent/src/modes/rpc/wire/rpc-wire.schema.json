@@ -761,7 +761,7 @@
 			},
 			{
 				"name": "logout",
-				"doc": "Remove one stored credential; fails when it is no longer stored. `remainingSource` names auth that still applies.",
+				"doc": "Remove one stored credential or local registration. Supply exactly one of credentialId and registrationId. `remainingSource` names auth that still applies; remoteRevoked reports registration revocation when applicable.",
 				"params": "LogoutParams",
 				"result": "LogoutResult",
 				"nullable": false,
@@ -1129,6 +1129,9 @@
 				},
 				"cost": {
 					"$ref": "#/$defs/UsageCost"
+				},
+				"hasUnpricedUsage": {
+					"type": "boolean"
 				},
 				"contextTokens": {
 					"type": "integer"
@@ -3222,6 +3225,9 @@
 				"cost": {
 					"type": "number"
 				},
+				"hasUnpricedUsage": {
+					"type": "boolean"
+				},
 				"sessionFile": {
 					"type": "string"
 				},
@@ -3623,9 +3629,6 @@
 		"LogoutAccount": {
 			"type": "object",
 			"properties": {
-				"credentialId": {
-					"type": "integer"
-				},
 				"provider": {
 					"type": "string"
 				},
@@ -3644,10 +3647,15 @@
 				},
 				"active": {
 					"type": "boolean"
+				},
+				"credentialId": {
+					"type": "integer"
+				},
+				"registrationId": {
+					"type": "string"
 				}
 			},
 			"required": [
-				"credentialId",
 				"provider",
 				"label",
 				"detail",
@@ -7136,11 +7144,13 @@
 				},
 				"credentialId": {
 					"type": "integer"
+				},
+				"registrationId": {
+					"type": "string"
 				}
 			},
 			"required": [
-				"providerId",
-				"credentialId"
+				"providerId"
 			]
 		},
 		"LogoutResult": {
@@ -7148,6 +7158,9 @@
 			"properties": {
 				"remainingSource": {
 					"type": "string"
+				},
+				"remoteRevoked": {
+					"type": "boolean"
 				}
 			}
 		},

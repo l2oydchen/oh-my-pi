@@ -484,19 +484,20 @@ func (v UsageCost) MarshalJSON() ([]byte, error) {
 }
 
 type Usage struct {
-	Input           int64                      `json:"input"`
-	Output          int64                      `json:"output"`
-	CacheRead       int64                      `json:"cacheRead"`
-	CacheWrite      int64                      `json:"cacheWrite"`
-	TotalTokens     int64                      `json:"totalTokens"`
-	Cost            UsageCost                  `json:"cost"`
-	ContextTokens   *int64                     `json:"contextTokens,omitempty"`
-	PremiumRequests *float64                   `json:"premiumRequests,omitempty"`
-	ReasoningTokens *int64                     `json:"reasoningTokens,omitempty"`
-	Orchestration   map[string]json.RawMessage `json:"orchestration,omitempty"`
-	Cttl            map[string]json.RawMessage `json:"cttl,omitempty"`
-	Server          map[string]json.RawMessage `json:"server,omitempty"`
-	Credits         map[string]json.RawMessage `json:"credits,omitempty"`
+	Input            int64                      `json:"input"`
+	Output           int64                      `json:"output"`
+	CacheRead        int64                      `json:"cacheRead"`
+	CacheWrite       int64                      `json:"cacheWrite"`
+	TotalTokens      int64                      `json:"totalTokens"`
+	Cost             UsageCost                  `json:"cost"`
+	HasUnpricedUsage *bool                      `json:"hasUnpricedUsage,omitempty"`
+	ContextTokens    *int64                     `json:"contextTokens,omitempty"`
+	PremiumRequests  *float64                   `json:"premiumRequests,omitempty"`
+	ReasoningTokens  *int64                     `json:"reasoningTokens,omitempty"`
+	Orchestration    map[string]json.RawMessage `json:"orchestration,omitempty"`
+	Cttl             map[string]json.RawMessage `json:"cttl,omitempty"`
+	Server           map[string]json.RawMessage `json:"server,omitempty"`
+	Credits          map[string]json.RawMessage `json:"credits,omitempty"`
 	// Extra holds undeclared keys and declared keys whose value did not decode (that field stays zero).
 	// Encoding writes them back, over a declared field with the same key.
 	Extra map[string]json.RawMessage `json:"-"`
@@ -515,6 +516,7 @@ func (v *Usage) decodeFrom(raw map[string]json.RawMessage) error {
 	d.required("cacheWrite", &out.CacheWrite)
 	d.required("totalTokens", &out.TotalTokens)
 	d.required("cost", &out.Cost)
+	d.optional("hasUnpricedUsage", &out.HasUnpricedUsage)
 	d.optional("contextTokens", &out.ContextTokens)
 	d.optional("premiumRequests", &out.PremiumRequests)
 	d.optional("reasoningTokens", &out.ReasoningTokens)
@@ -3089,6 +3091,7 @@ type SessionStats struct {
 	Tokens            TokenUsage         `json:"tokens"`
 	PremiumRequests   float64            `json:"premiumRequests"`
 	Cost              float64            `json:"cost"`
+	HasUnpricedUsage  *bool              `json:"hasUnpricedUsage,omitempty"`
 	SessionFile       *string            `json:"sessionFile,omitempty"`
 	Credits           *SessionCredits    `json:"credits,omitempty"`
 	RoutedModels      map[string]float64 `json:"routedModels,omitempty"`
@@ -3113,6 +3116,7 @@ func (v *SessionStats) decodeFrom(raw map[string]json.RawMessage) error {
 	d.required("tokens", &out.Tokens)
 	d.required("premiumRequests", &out.PremiumRequests)
 	d.required("cost", &out.Cost)
+	d.optional("hasUnpricedUsage", &out.HasUnpricedUsage)
 	d.optional("sessionFile", &out.SessionFile)
 	d.optional("credits", &out.Credits)
 	d.optional("routedModels", &out.RoutedModels)
@@ -3461,12 +3465,13 @@ func (v *LoginProvider) decodeFrom(raw map[string]json.RawMessage) error {
 
 // A stored credential `logout` can remove; `active` marks credentials the session may be using.
 type LogoutAccount struct {
-	CredentialID int64             `json:"credentialId"`
-	Provider     string            `json:"provider"`
-	Label        string            `json:"label"`
-	Detail       string            `json:"detail"`
-	Type         LogoutAccountType `json:"type"`
-	Active       bool              `json:"active"`
+	Provider       string            `json:"provider"`
+	Label          string            `json:"label"`
+	Detail         string            `json:"detail"`
+	Type           LogoutAccountType `json:"type"`
+	Active         bool              `json:"active"`
+	CredentialID   *int64            `json:"credentialId,omitempty"`
+	RegistrationID *string           `json:"registrationId,omitempty"`
 }
 
 func (v *LogoutAccount) UnmarshalJSON(data []byte) error {
@@ -3476,12 +3481,13 @@ func (v *LogoutAccount) UnmarshalJSON(data []byte) error {
 func (v *LogoutAccount) decodeFrom(raw map[string]json.RawMessage) error {
 	var out LogoutAccount
 	d := fieldDecoder{raw: raw, owner: "LogoutAccount"}
-	d.required("credentialId", &out.CredentialID)
 	d.required("provider", &out.Provider)
 	d.required("label", &out.Label)
 	d.required("detail", &out.Detail)
 	d.required("type", &out.Type)
 	d.required("active", &out.Active)
+	d.optional("credentialId", &out.CredentialID)
+	d.optional("registrationId", &out.RegistrationID)
 	if d.err != nil {
 		return d.err
 	}
@@ -7714,6 +7720,7 @@ func (v *GetLogoutAccountsResult) decodeFrom(raw map[string]json.RawMessage) err
 
 type LogoutResult struct {
 	RemainingSource *string `json:"remainingSource,omitempty"`
+	RemoteRevoked   *bool   `json:"remoteRevoked,omitempty"`
 }
 
 func (v *LogoutResult) UnmarshalJSON(data []byte) error {
@@ -7724,6 +7731,7 @@ func (v *LogoutResult) decodeFrom(raw map[string]json.RawMessage) error {
 	var out LogoutResult
 	d := fieldDecoder{raw: raw, owner: "LogoutResult"}
 	d.optional("remainingSource", &out.RemainingSource)
+	d.optional("remoteRevoked", &out.RemoteRevoked)
 	if d.err != nil {
 		return d.err
 	}
@@ -8521,11 +8529,12 @@ func (c Commands) GetLogoutAccounts(ctx context.Context, p GetLogoutAccountsComm
 
 // LogoutCommand holds the parameters of "logout".
 type LogoutCommand struct {
-	ProviderID   string `json:"providerId"`
-	CredentialID int64  `json:"credentialId"`
+	ProviderID     string  `json:"providerId"`
+	CredentialID   *int64  `json:"credentialId,omitempty"`
+	RegistrationID *string `json:"registrationId,omitempty"`
 }
 
-// Logout sends "logout": Remove one stored credential; fails when it is no longer stored. `remainingSource` names auth that still applies.
+// Logout sends "logout": Remove one stored credential or local registration. Supply exactly one of credentialId and registrationId. `remainingSource` names auth that still applies; remoteRevoked reports registration revocation when applicable.
 func (c Commands) Logout(ctx context.Context, p LogoutCommand) (LogoutResult, error) {
 	var out LogoutResult
 	err := c.call(ctx, "logout", p, 0, &out)

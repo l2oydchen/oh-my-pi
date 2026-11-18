@@ -675,6 +675,7 @@ pub struct Usage {
 	pub cache_write: Option<i64>,
 	pub total_tokens: Option<i64>,
 	pub cost: Option<UsageCost>,
+	pub has_unpriced_usage: Option<bool>,
 	pub context_tokens: Option<i64>,
 	pub premium_requests: Option<f64>,
 	pub reasoning_tokens: Option<i64>,
@@ -707,6 +708,9 @@ impl Serialize for Usage {
 		if let Some(value) = &self.cost {
 			map.serialize_entry("cost", value)?;
 		}
+		if let Some(value) = &self.has_unpriced_usage {
+			map.serialize_entry("hasUnpricedUsage", value)?;
+		}
 		if let Some(value) = &self.context_tokens {
 			map.serialize_entry("contextTokens", value)?;
 		}
@@ -736,6 +740,7 @@ impl Serialize for Usage {
 				"cacheWrite" if self.cache_write.is_some() => continue,
 				"totalTokens" if self.total_tokens.is_some() => continue,
 				"cost" if self.cost.is_some() => continue,
+				"hasUnpricedUsage" if self.has_unpriced_usage.is_some() => continue,
 				"contextTokens" if self.context_tokens.is_some() => continue,
 				"premiumRequests" if self.premium_requests.is_some() => continue,
 				"reasoningTokens" if self.reasoning_tokens.is_some() => continue,
@@ -761,6 +766,7 @@ impl<'de> Deserialize<'de> for Usage {
 			cache_write: take(&mut extra, "cacheWrite"),
 			total_tokens: take(&mut extra, "totalTokens"),
 			cost: take(&mut extra, "cost"),
+			has_unpriced_usage: take(&mut extra, "hasUnpricedUsage"),
 			context_tokens: take(&mut extra, "contextTokens"),
 			premium_requests: take(&mut extra, "premiumRequests"),
 			reasoning_tokens: take(&mut extra, "reasoningTokens"),
@@ -3382,6 +3388,8 @@ pub struct SessionStats {
 	#[serde(rename = "premiumRequests")]
 	pub premium_requests: f64,
 	pub cost: f64,
+	#[serde(rename = "hasUnpricedUsage", default, skip_serializing_if = "Option::is_none")]
+	pub has_unpriced_usage: Option<bool>,
 	#[serde(rename = "sessionFile", default, skip_serializing_if = "Option::is_none")]
 	pub session_file: Option<String>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3569,13 +3577,15 @@ pub struct LoginProvider {
 /// A stored credential `logout` can remove; `active` marks credentials the session may be using.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogoutAccount {
-	#[serde(rename = "credentialId")]
-	pub credential_id: i64,
 	pub provider: String,
 	pub label: String,
 	pub detail: String,
 	pub r#type: LogoutAccountType,
 	pub active: bool,
+	#[serde(rename = "credentialId", default, skip_serializing_if = "Option::is_none")]
+	pub credential_id: Option<i64>,
+	#[serde(rename = "registrationId", default, skip_serializing_if = "Option::is_none")]
+	pub registration_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -5694,14 +5704,18 @@ pub struct GetLogoutAccountsResult {
 pub struct LogoutParams {
 	#[serde(rename = "providerId")]
 	pub provider_id: String,
-	#[serde(rename = "credentialId")]
-	pub credential_id: i64,
+	#[serde(rename = "credentialId", default, skip_serializing_if = "Option::is_none")]
+	pub credential_id: Option<i64>,
+	#[serde(rename = "registrationId", default, skip_serializing_if = "Option::is_none")]
+	pub registration_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogoutResult {
 	#[serde(rename = "remainingSource", default, skip_serializing_if = "Option::is_none")]
 	pub remaining_source: Option<String>,
+	#[serde(rename = "remoteRevoked", default, skip_serializing_if = "Option::is_none")]
+	pub remote_revoked: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -7354,13 +7368,15 @@ impl Command for GetLogoutAccountsCommand {
 	}
 }
 
-/// Remove one stored credential; fails when it is no longer stored. `remainingSource` names auth that still applies.
+/// Remove one stored credential or local registration. Supply exactly one of credentialId and registrationId. `remainingSource` names auth that still applies; remoteRevoked reports registration revocation when applicable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LogoutCommand {
 	#[serde(rename = "providerId")]
 	pub provider_id: String,
-	#[serde(rename = "credentialId")]
-	pub credential_id: i64,
+	#[serde(rename = "credentialId", default, skip_serializing_if = "Option::is_none")]
+	pub credential_id: Option<i64>,
+	#[serde(rename = "registrationId", default, skip_serializing_if = "Option::is_none")]
+	pub registration_id: Option<String>,
 }
 
 impl Command for LogoutCommand {

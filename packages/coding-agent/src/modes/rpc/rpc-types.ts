@@ -149,7 +149,7 @@ export type RpcCommand =
 	| { id?: string; type: "get_login_providers" }
 	| { id?: string; type: "login"; providerId: string }
 	| { id?: string; type: "get_logout_accounts"; providerId: string }
-	| { id?: string; type: "logout"; providerId: string; credentialId: number }
+	| { id?: string; type: "logout"; providerId: string; credentialId?: number; registrationId?: string }
 
 	// Word prediction (composer ghost text); `cursor` is a UTF-16 offset into `text`
 	| { id?: string; type: "predict_word"; text: string; cursor: number }
@@ -656,7 +656,13 @@ export type RpcResponse =
 			success: true;
 			data: { accounts: LogoutAccount[] };
 	  }
-	| { id?: string; type: "response"; command: "logout"; success: true; data: { remainingSource?: string } }
+	| {
+			id?: string;
+			type: "response";
+			command: "logout";
+			success: true;
+			data: { remainingSource?: string; remoteRevoked?: boolean };
+	  }
 
 	// Word prediction
 	| { id?: string; type: "response"; command: "predict_word"; success: true; data: { suffix: string | null } }

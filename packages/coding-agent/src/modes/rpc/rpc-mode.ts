@@ -60,7 +60,7 @@ import { probeSessionLeases } from "../../session/session-storage";
 import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
 import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";
 import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
-import { listLogoutAccounts, logoutCredential } from "../../slash-commands/helpers/logout";
+import { listLogoutAccounts, logoutCredential, logoutRegistration } from "../../slash-commands/helpers/logout";
 import { cfgSttEnabled } from "../../stt/settings";
 import { defaultLoadModeForToolName } from "../../tools/essential-tools";
 import type { EventBus } from "../../utils/event-bus";
@@ -2834,18 +2834,32 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			}
 
 			case "logout": {
-				if (typeof command.providerId !== "string" || !Number.isInteger(command.credentialId)) {
-					return error(id, "logout", "providerId must be a string and credentialId an integer");
+				const hasCredential = command.credentialId !== undefined;
+				const hasRegistration = command.registrationId !== undefined;
+				if (
+					typeof command.providerId !== "string" ||
+					hasCredential === hasRegistration ||
+					(hasCredential && !Number.isInteger(command.credentialId)) ||
+					(hasRegistration && (typeof command.registrationId !== "string" || !command.registrationId.trim()))
+				) {
+					return error(
+						id,
+						"logout",
+						"Supply providerId and exactly one integer credentialId or nonempty registrationId",
+					);
 				}
-				const { removed, remainingSource } = await logoutCredential(
-					session,
-					command.providerId,
-					command.credentialId,
-				);
+				const { removed, remainingSource, remoteRevoked } =
+					command.registrationId !== undefined
+						? await logoutRegistration(session, command.providerId, command.registrationId)
+						: await logoutCredential(session, command.providerId, command.credentialId!);
 				if (!removed) {
-					return error(id, "logout", `Credential ${command.credentialId} is not stored for ${command.providerId}`);
+					return error(
+						id,
+						"logout",
+						`Account ${command.registrationId ?? command.credentialId} is not stored for ${command.providerId}`,
+					);
 				}
-				return success(id, "logout", { remainingSource });
+				return success(id, "logout", { remainingSource, remoteRevoked });
 			}
 
 			// =================================================================

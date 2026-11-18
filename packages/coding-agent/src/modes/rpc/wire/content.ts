@@ -69,6 +69,7 @@ export const messageDefs = {
 		total: "number",
 	},
 	Usage: {
+		"hasUnpricedUsage?": "boolean",
 		input: "number.integer",
 		output: "number.integer",
 		cacheRead: "number.integer",

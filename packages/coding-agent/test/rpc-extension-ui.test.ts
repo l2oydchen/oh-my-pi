@@ -132,6 +132,7 @@ await runRpcMode(session, {
 			env: {
 				PATH: Bun.env.PATH,
 				HOME: temp.join("home"),
+				USERPROFILE: temp.join("home"),
 				PI_CODING_AGENT_DIR: temp.join("agent"),
 				XDG_CONFIG_HOME: temp.join("config"),
 				XDG_DATA_HOME: temp.join("data"),
@@ -211,6 +212,7 @@ await runRpcMode(session);
 			env: {
 				PATH: Bun.env.PATH,
 				HOME: temp.join("home"),
+				USERPROFILE: temp.join("home"),
 				PI_CODING_AGENT_DIR: temp.join("agent"),
 				XDG_CONFIG_HOME: temp.join("config"),
 				XDG_DATA_HOME: temp.join("data"),
@@ -480,6 +482,7 @@ export default function(pi) {
 				env: {
 					PATH: Bun.env.PATH,
 					HOME: temp.join("home"),
+					USERPROFILE: temp.join("home"),
 					PI_CODING_AGENT_DIR: temp.join("agent"),
 					XDG_CONFIG_HOME: temp.join("config"),
 					XDG_DATA_HOME: temp.join("data"),
@@ -755,6 +758,7 @@ describe("RPC ask dialog", () => {
 				env: {
 					PATH: Bun.env.PATH,
 					HOME: temp.join("home"),
+					USERPROFILE: temp.join("home"),
 					PI_CODING_AGENT_DIR: temp.join("agent"),
 					XDG_CONFIG_HOME: temp.join("config"),
 					XDG_DATA_HOME: temp.join("data"),

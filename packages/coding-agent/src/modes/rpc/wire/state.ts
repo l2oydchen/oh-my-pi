@@ -266,6 +266,7 @@ export const stateDefs = {
 	},
 	SessionCredits: { cost: "number", committedCost: "number", acuCost: "number" },
 	SessionStats: {
+		"hasUnpricedUsage?": "boolean",
 		"sessionFile?": "string",
 		sessionId: "string",
 		userMessages: "number.integer",
@@ -360,7 +361,8 @@ export const stateDefs = {
 	LoginProvider: { id: "string", name: "string", available: "boolean", authenticated: "boolean" },
 	LogoutAccount: doc(
 		{
-			credentialId: "number.integer",
+			"credentialId?": "number.integer",
+			"registrationId?": "string",
 			provider: "string",
 			label: "string",
 			detail: "string",

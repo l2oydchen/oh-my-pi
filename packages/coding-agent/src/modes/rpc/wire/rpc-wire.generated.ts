@@ -82,6 +82,7 @@ export interface Usage {
 	cacheWrite: number;
 	totalTokens: number;
 	cost: UsageCost;
+	hasUnpricedUsage?: boolean;
 	contextTokens?: number;
 	premiumRequests?: number;
 	reasoningTokens?: number;
@@ -681,6 +682,7 @@ export interface SessionStats {
 	tokens: TokenUsage;
 	premiumRequests: number;
 	cost: number;
+	hasUnpricedUsage?: boolean;
 	sessionFile?: string;
 	credits?: SessionCredits;
 	routedModels?: Record<string, number>;
@@ -794,12 +796,13 @@ export interface LoginProvider {
 
 /** A stored credential `logout` can remove; `active` marks credentials the session may be using. */
 export interface LogoutAccount {
-	credentialId: number;
 	provider: string;
 	label: string;
 	detail: string;
 	type: "api_key" | "oauth";
 	active: boolean;
+	credentialId?: number;
+	registrationId?: string;
 }
 
 export interface HandoffResult {
@@ -1891,11 +1894,13 @@ export interface GetLogoutAccountsResult {
 
 export interface LogoutParams {
 	providerId: string;
-	credentialId: number;
+	credentialId?: number;
+	registrationId?: string;
 }
 
 export interface LogoutResult {
 	remainingSource?: string;
+	remoteRevoked?: boolean;
 }
 
 export interface PredictWordParams {

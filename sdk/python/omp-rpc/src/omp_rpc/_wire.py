@@ -268,6 +268,7 @@ class Usage(TypedDict):
     cacheWrite: int
     totalTokens: int
     cost: UsageCost
+    hasUnpricedUsage: NotRequired[bool]
     contextTokens: NotRequired[int]
     premiumRequests: NotRequired[float]
     reasoningTokens: NotRequired[int]
@@ -853,6 +854,7 @@ class SessionStats:
     tokens: TokenUsage
     premium_requests: float
     cost: float
+    has_unpriced_usage: bool | None = None
     session_file: str | None = None
     credits: SessionCredits | None = None
     routed_models: dict[str, float] | None = None
@@ -975,12 +977,13 @@ class LoginProvider:
 @dataclass(slots=True, frozen=True, kw_only=True)
 class LogoutAccount:
     """A stored credential `logout` can remove; `active` marks credentials the session may be using."""
-    credential_id: int
     provider: str
     label: str
     detail: str
     type: Literal["api_key", "oauth"]
     active: bool
+    credential_id: int | None = None
+    registration_id: str | None = None
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -1715,6 +1718,7 @@ class GetSessionLeaseResult:
 @dataclass(slots=True, frozen=True, kw_only=True)
 class LogoutResult:
     remaining_source: str | None = None
+    remote_revoked: bool | None = None
 
 
 UserContent: TypeAlias = TextContent | ImageContent
@@ -2277,6 +2281,7 @@ def parse_session_stats(value: object, path: str = "SessionStats") -> SessionSta
         tokens=required(payload, "tokens", parse_token_usage, path),
         premium_requests=required(payload, "premiumRequests", decode_float, path),
         cost=required(payload, "cost", decode_float, path),
+        has_unpriced_usage=optional(payload, "hasUnpricedUsage", decode_bool, path),
         session_file=optional(payload, "sessionFile", decode_str, path),
         credits=optional(payload, "credits", parse_session_credits, path),
         routed_models=optional(payload, "routedModels", record(decode_float), path),
@@ -2410,12 +2415,13 @@ def parse_login_provider(value: object, path: str = "LoginProvider") -> LoginPro
 def parse_logout_account(value: object, path: str = "LogoutAccount") -> LogoutAccount:
     payload = expect_object(value, path)
     return LogoutAccount(
-        credential_id=required(payload, "credentialId", decode_int, path),
         provider=required(payload, "provider", decode_str, path),
         label=required(payload, "label", decode_str, path),
         detail=required(payload, "detail", decode_str, path),
         type=required(payload, "type", cast('Decoder[Literal["api_key", "oauth"]]', literal(frozenset({"api_key", "oauth"}))), path),
         active=required(payload, "active", decode_bool, path),
+        credential_id=optional(payload, "credentialId", decode_int, path),
+        registration_id=optional(payload, "registrationId", decode_str, path),
     )
 
 
@@ -3243,6 +3249,7 @@ def parse_logout_result(value: object, path: str = "LogoutResult") -> LogoutResu
     payload = expect_object(value, path)
     return LogoutResult(
         remaining_source=optional(payload, "remainingSource", decode_str, path),
+        remote_revoked=optional(payload, "remoteRevoked", decode_bool, path),
     )
 
 
@@ -3775,11 +3782,14 @@ class WireClient:
         params["providerId"] = provider_id
         return required(expect_object(self._command("get_logout_accounts", params), "get_logout_accounts"), "accounts", array(parse_logout_account), "get_logout_accounts")
 
-    def logout(self, provider_id: str, credential_id: int) -> LogoutResult:
-        """Remove one stored credential; fails when it is no longer stored. `remainingSource` names auth that still applies."""
+    def logout(self, provider_id: str, *, credential_id: int | None = None, registration_id: str | None = None) -> LogoutResult:
+        """Remove one stored credential or local registration. Supply exactly one of credentialId and registrationId. `remainingSource` names auth that still applies; remoteRevoked reports registration revocation when applicable."""
         params: dict[str, object] = {}
         params["providerId"] = provider_id
-        params["credentialId"] = credential_id
+        if credential_id is not None:
+            params["credentialId"] = credential_id
+        if registration_id is not None:
+            params["registrationId"] = registration_id
         return parse_logout_result(self._command("logout", params), "logout")
 
     def predict_word(self, text: str, cursor: int) -> str | None:

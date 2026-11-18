@@ -378,9 +378,9 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 	},
 	{
 		name: "logout",
-		doc: "Remove one stored credential; fails when it is no longer stored. `remainingSource` names auth that still applies.",
-		params: { providerId: "string", credentialId: "number.integer" },
-		result: { "remainingSource?": "string" },
+		doc: "Remove one stored credential or local registration. Supply exactly one of credentialId and registrationId. `remainingSource` names auth that still applies; remoteRevoked reports registration revocation when applicable.",
+		params: { providerId: "string", "credentialId?": "number.integer", "registrationId?": "string" },
+		result: { "remainingSource?": "string", "remoteRevoked?": "boolean" },
 	},
 
 	{
