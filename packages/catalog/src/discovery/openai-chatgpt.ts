@@ -7,6 +7,12 @@ export interface OpenAIChatGPTModelCard {
 	slug: string;
 	display_name: string;
 	visibility: string;
+	context_window?: number;
+	max_context_window?: number;
+}
+
+function positiveTokenLimit(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
 export interface FetchOpenAIChatGPTModelsOptions {
@@ -37,7 +43,15 @@ export function parseOpenAIChatGPTModelCards(payload: unknown): OpenAIChatGPTMod
 		const slug = raw.slug.trim();
 		if (seen.has(slug)) continue;
 		seen.add(slug);
-		cards.push({ slug, display_name: raw.display_name.trim(), visibility: raw.visibility });
+		const contextWindow = positiveTokenLimit(raw.context_window);
+		const maxContextWindow = positiveTokenLimit(raw.max_context_window);
+		cards.push({
+			slug,
+			display_name: raw.display_name.trim(),
+			visibility: raw.visibility,
+			...(contextWindow !== undefined && { context_window: contextWindow }),
+			...(maxContextWindow !== undefined && { max_context_window: maxContextWindow }),
+		});
 	}
 	return cards;
 }
@@ -85,7 +99,13 @@ export async function fetchOpenAIChatGPTModels(
 		reasoning: false,
 		input: ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: null,
+		// Keep the normal window separate from the server-advertised opt-in
+		// maximum. Missing metadata remains unknown, never an API catalog guess.
+		contextWindow:
+			card.context_window !== undefined && card.max_context_window !== undefined
+				? Math.min(card.context_window, card.max_context_window)
+				: (card.context_window ?? card.max_context_window ?? null),
+		...(card.max_context_window !== undefined && { maxContextWindow: card.max_context_window }),
 		maxTokens: null,
 		accountAccess: { [options.registrationId]: {} },
 	}));

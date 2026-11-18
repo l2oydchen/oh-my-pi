@@ -1,0 +1,6 @@
+# Development overlay only; does not alter the user's config or running sessions.
+extendedContext: true
+compaction:
+  enabled: true
+  modelThresholds:
+    openai-chatgpt/*: f500000

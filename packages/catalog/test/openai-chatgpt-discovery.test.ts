@@ -9,6 +9,79 @@ import { openaiChatGPTModelManagerOptions } from "../src/provider-models/openai-
 import type { FetchImpl } from "../src/types";
 
 describe("Sign in with ChatGPT model discovery", () => {
+	test.each(["gpt-5.4", "gpt-5.3-codex"])("keeps account capacity instead of the %s API lineage patch", async id => {
+		const specs = await fetchOpenAIChatGPTModels({
+			apiKey: "fixture",
+			registrationId: "r",
+			fetch: async () =>
+				Response.json({
+					models: [
+						{
+							slug: id,
+							display_name: id,
+							visibility: "list",
+							context_window: 200_000,
+							max_context_window: 640_000,
+						},
+					],
+				}),
+		});
+		if (!specs?.[0]) throw new Error("Missing discovered model");
+		expect(buildModel(specs[0]).contextWindow).toBe(200_000);
+	});
+	test("preserves server context tiers through model construction without filling unknown output limits", async () => {
+		const specs = await fetchOpenAIChatGPTModels({
+			apiKey: "fixture",
+			registrationId: "registration-a",
+			fetch: async () =>
+				Response.json({
+					models: [
+						{
+							slug: "gpt-6.2-astra",
+							display_name: "Astra",
+							visibility: "list",
+							context_window: 272_000,
+							max_context_window: 872_000,
+						},
+						{
+							slug: "gpt-6.2-sol",
+							display_name: "Sol",
+							visibility: "list",
+							context_window: 500_000,
+							max_context_window: 872_000,
+						},
+					],
+				}),
+		});
+		expect(
+			specs?.map(spec => {
+				const model = buildModel(spec);
+				return [model.contextWindow, model.maxContextWindow, model.maxTokens];
+			}),
+		).toEqual([
+			[272_000, 872_000, null],
+			[500_000, 872_000, null],
+		]);
+	});
+
+	test.each([
+		[{ context_window: 320_000 }, 320_000, undefined],
+		[{ max_context_window: 640_000 }, 640_000, 640_000],
+		[{ context_window: 900_000, max_context_window: 640_000 }, 640_000, 640_000],
+		[{ context_window: "272000", max_context_window: 0 }, null, undefined],
+		[{ context_window: -1, max_context_window: 1.5 }, null, undefined],
+	])("handles incomplete or invalid capacity metadata %j", async (fields, expectedWindow, expectedMaximum) => {
+		const specs = await fetchOpenAIChatGPTModels({
+			apiKey: "fixture",
+			registrationId: "r",
+			fetch: async () =>
+				Response.json({
+					models: [{ slug: "gpt-6.2-astra", display_name: "Astra", visibility: "list", ...fields }],
+				}),
+		});
+		expect(specs?.[0]?.contextWindow).toBe(expectedWindow);
+		expect(specs?.[0]?.maxContextWindow).toBe(expectedMaximum);
+	});
 	test("uses the public endpoint and preserves the account's listed order without adding API models", async () => {
 		const calls: Array<{ url: string; init?: RequestInit }> = [];
 		const fetch: FetchImpl = async (input, init) => {

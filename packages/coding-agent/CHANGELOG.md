@@ -8,6 +8,8 @@
 
 ### Added
 
+- Added a development Pilot example with ChatGPT context usage, compaction tracking, and a subscription-only fixed compaction threshold.
+
 - Added Sign in with ChatGPT to the existing login, logout, account selection, and model-role flows, including reviewer tasks and API-model switching.
 - Added RPC logout by registration ID, including identity-only ChatGPT sign-ins and remote revocation status, and exposed unpriced plan usage in generated RPC types.
 - Bash redirects now write every writable internal URL, not just `local://` and `out://`: `: > proc://<id>/kill` cancels a job, and `agent://`, `cfg://`, `ssh://`, `xd://`, and other handler-written URLs take redirected text like the `write` tool, with the handler's answer shown in the result

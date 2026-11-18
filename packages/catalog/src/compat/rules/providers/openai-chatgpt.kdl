@@ -5,6 +5,8 @@ provider "openai-chatgpt" {
 	default-model "gpt-5.5"
 	dynamic-models-authoritative #true
 	skip-cross-provider-reference-fills #true
+	// Explicit configuration cannot exceed this registration's live maximum.
+	clamp-context-override #true
 	pricing-status "included"
 	supports-websockets #true
 	hosted-image #false
@@ -20,7 +22,19 @@ provider "openai-chatgpt" {
 	supports-prompt-cache-breakpoints #false
 	uses-openai-tool-call-id-limit #true
 
-	// Discovery reports names and visibility, not reasoning or modalities.
+	// Discovery supplies capacity; do not overwrite it with API/Codex limits.
+	class "openai" {
+		models "gpt-5.4" {
+			limits-patch {}
+			long-context-window-uncapped #false
+		}
+		family "codex" {
+			revision ">=1" {
+				limits-patch {}
+			}
+		}
+	}
+	// Discovery does not currently resolve reasoning or modalities here.
 	// Repair only reviewed GPT reasoning lineages using the shared class rules.
 	class "openai" {
 		// The hosted-tool class+API+revision grant ties this provider+class+revision

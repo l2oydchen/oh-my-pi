@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Restored account-advertised ChatGPT context windows and capped local overrides at the discovered maximum.
+
 ### Added
 
 - Added Sign in with ChatGPT model discovery with a separate catalog for each local account registration.
