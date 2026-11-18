@@ -23,23 +23,40 @@ describe("OAuthSelectorComponent", () => {
 			credentials: { has: () => false },
 			keys: { source: () => undefined },
 			oauth: {
-				registrations: provider => provider === "openai-chatgpt" ? [{
-					registrationId: "identity-only",
-					provider,
-					clientId: "saved-client",
-					issuer: "https://auth.openai.com",
-					subject: "saved-subject",
-					label: "person@example.com",
-					status: "signed_in",
-					planAccess: "disabled",
-				}] : [],
+				registrations: provider =>
+					provider === "openai-chatgpt"
+						? [
+								{
+									registrationId: "identity-only",
+									provider,
+									clientId: "saved-client",
+									issuer: "https://auth.openai.com",
+									subject: "saved-subject",
+									label: "person@example.com",
+									status: "signed_in",
+									planAccess: "disabled",
+								},
+							]
+						: [],
 			},
 		};
 		const selected: string[] = [];
-		const component = new OAuthSelectorComponent("logout", source, provider => selected.push(provider), () => {}, {
-			validateAuth: async () => { validations++; return false; },
-		});
-		const rendered = component.render(100).map(line => Bun.stripANSI(line)).join("\n");
+		const component = new OAuthSelectorComponent(
+			"logout",
+			source,
+			provider => selected.push(provider),
+			() => {},
+			{
+				validateAuth: async () => {
+					validations++;
+					return false;
+				},
+			},
+		);
+		const rendered = component
+			.render(100)
+			.map(line => Bun.stripANSI(line))
+			.join("\n");
 		expect(rendered).toContain("plan usage disabled");
 		expect(validations).toBe(0);
 		component.handleInput("\n");

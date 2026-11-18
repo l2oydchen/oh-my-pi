@@ -217,7 +217,12 @@ export abstract class OAuthCallbackFlow<TResult = OAuthCredentials> {
 	 * @param redirectUri - The actual redirect URI used (must match authorization request)
 	 * @returns OAuth credentials
 	 */
-	abstract exchangeToken(code: string, state: string, redirectUri: string, callback?: CallbackResult): Promise<TResult>;
+	abstract exchangeToken(
+		code: string,
+		state: string,
+		redirectUri: string,
+		callback?: CallbackResult,
+	): Promise<TResult>;
 
 	/** Provider-specific callback fields, validated only after the state matches. */
 	validateCallback(url: URL, expectedState: string): CallbackResult {
@@ -568,12 +573,16 @@ export abstract class OAuthCallbackFlow<TResult = OAuthCredentials> {
 
 		if (url.pathname !== this.callbackPath) {
 			if (url.pathname === LAUNCH_PATH) {
-				if (this.#privateAuthorizationUrl && url.searchParams.get("key") !== this.#launchNonce) return new Response("Not Found", { status: 404 });
+				if (this.#privateAuthorizationUrl && url.searchParams.get("key") !== this.#launchNonce)
+					return new Response("Not Found", { status: 404 });
 				const pending = this.#pendingAuthUrl;
 				if (!pending) {
 					return new Response("OAuth launch URL is no longer active", { status: 503 });
 				}
-				return new Response(null, { status: 302, headers: { Location: pending, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+				return new Response(null, {
+					status: 302,
+					headers: { Location: pending, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" },
+				});
 			}
 			return new Response("Not Found", { status: 404 });
 		}
@@ -581,7 +590,9 @@ export abstract class OAuthCallbackFlow<TResult = OAuthCredentials> {
 		const code = url.searchParams.get("code");
 		const state = url.searchParams.get("state") || "";
 		const error = url.searchParams.get("error") || "";
-		const errorDescription = this.#privateAuthorizationUrl ? "Sign-in was not completed" : url.searchParams.get("error_description") || error;
+		const errorDescription = this.#privateAuthorizationUrl
+			? "Sign-in was not completed"
+			: url.searchParams.get("error_description") || error;
 
 		type OkState = { ok: true } & CallbackResult;
 		type ErrorState = { ok?: false; error?: string };
@@ -633,7 +644,11 @@ export abstract class OAuthCallbackFlow<TResult = OAuthCredentials> {
 	/**
 	 * Wait for OAuth callback or manual input (whichever comes first).
 	 */
-	#waitForCallback(expectedState: string, redirectUri: string, nativeCallback?: Promise<CallbackResult>): Promise<CallbackResult> {
+	#waitForCallback(
+		expectedState: string,
+		redirectUri: string,
+		nativeCallback?: Promise<CallbackResult>,
+	): Promise<CallbackResult> {
 		const timeoutSignal = AbortSignal.timeout(DEFAULT_TIMEOUT);
 		const settledSignal = new AbortController();
 		const signals = this.ctrl.signal

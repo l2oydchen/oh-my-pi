@@ -28,9 +28,7 @@ type BillingUnit = "metered" | "subscription";
 /** Read the compiled request contract instead of inferring billing from a provider name or token. */
 export function isUsingChatGPTPlan(model: Model | undefined): boolean {
 	const compat = model?.compat;
-	return (
-		compat !== undefined && "responsesRequestContract" in compat && compat.responsesRequestContract === "chatgpt"
-	);
+	return compat !== undefined && "responsesRequestContract" in compat && compat.responsesRequestContract === "chatgpt";
 }
 
 /** `showUnit: false` omits the `$`/subscription symbol when the summary already printed it. */

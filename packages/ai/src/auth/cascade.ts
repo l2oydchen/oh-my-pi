@@ -224,7 +224,10 @@ export class KeyCascade implements KeysApi {
 	source(provider: string, { env = "dedicated" }: AuthSourceOptions = {}): AuthSource | undefined {
 		if (providerPauseReason(provider) !== undefined) return undefined;
 		if (authPolicyFor(provider)?.localOnly && !hasOAuthRegistrations(this.#deps.store)) return undefined;
-		if (authPolicyFor(provider)?.oauthOnly) return this.#getAuthBearingCredentials(provider).some(item => item.type === "oauth") ? { kind: "oauth", concrete: true } : undefined;
+		if (authPolicyFor(provider)?.oauthOnly)
+			return this.#getAuthBearingCredentials(provider).some(item => item.type === "oauth")
+				? { kind: "oauth", concrete: true }
+				: undefined;
 		if (this.#deps.overrides.runtimeKey(provider) !== undefined) return { kind: "runtime", concrete: true };
 		if (this.#deps.overrides.configKey(provider) !== undefined) return { kind: "config", concrete: true };
 		const bearing = this.#getAuthBearingCredentials(provider);
@@ -291,8 +294,19 @@ export class KeyCascade implements KeysApi {
 				"oauth",
 				undefined,
 				credential =>
-					credential.type === "oauth" && !credential.pendingRotation && Number.isFinite(credential.expires) && credential.expires > now,
-			) ?? (options?.includeExpired ? this.#deps.selector.selectByType(provider, "oauth", undefined, credential => credential.type === "oauth" && !credential.pendingRotation) : undefined);
+					credential.type === "oauth" &&
+					!credential.pendingRotation &&
+					Number.isFinite(credential.expires) &&
+					credential.expires > now,
+			) ??
+			(options?.includeExpired
+				? this.#deps.selector.selectByType(
+						provider,
+						"oauth",
+						undefined,
+						credential => credential.type === "oauth" && !credential.pendingRotation,
+					)
+				: undefined);
 		if (oauthSelection) {
 			if (provider === "github-copilot") {
 				return JSON.stringify({

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, vi } from "bun:test";
 import { authHookNames, authProviders } from "@oh-my-pi/pi-catalog/compat/auth";
 import { HOOKS } from "../src/registry/hooks";
 import { PROVIDER_REGISTRY } from "../src/registry/registry";
@@ -13,6 +13,24 @@ const TABLE_FOR_KIND: Record<string, keyof typeof HOOKS> = {
 };
 
 describe("auth rules ↔ hook registry", () => {
+	test("Antigravity refresh keeps using HTTP when the caller supplies a durable refresh context", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(Response.json({ access_token: "renewed", expires_in: 3600 }));
+		try {
+			const refresh = await HOOKS.refresh["antigravity-cli"]();
+			const checkpoint = vi.fn(async () => {});
+			const result = await refresh({ access: "old", refresh: "refresh-fixture", expires: 1 }, undefined, {
+				checkpoint,
+			});
+			expect(result.access).toBe("renewed");
+			expect(result.refresh).toBe("refresh-fixture");
+			expect(fetchSpy).toHaveBeenCalledTimes(1);
+			expect(checkpoint).not.toHaveBeenCalled();
+		} finally {
+			fetchSpy.mockRestore();
+		}
+	});
 	test("every hook name referenced by rules/auth/*.kdl resolves to a registered hook", () => {
 		const missing: string[] = [];
 		const referenced = authHookNames();

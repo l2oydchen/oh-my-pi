@@ -170,16 +170,19 @@ export class OAuthSelectorComponent extends OverlayPanel {
 	#hasSelectableAuth(providerId: string): boolean {
 		return this.#mode === "logout"
 			? this.#authStorage.credentials.has(providerId) ||
-				this.#authStorage.oauth?.registrations(providerId).some(registration => registration.status !== "signed_out") === true
+					this.#authStorage.oauth
+						?.registrations(providerId)
+						.some(registration => registration.status !== "signed_out") === true
 			: this.#authStorage.keys.source(providerId) !== undefined || this.#hasIdentityOnlyLogin(providerId);
 	}
 
 	#hasIdentityOnlyLogin(providerId: string): boolean {
 		return (
 			this.#authStorage.keys.source(providerId) === undefined &&
-			this.#authStorage.oauth?.registrations(providerId).some(
-				registration => registration.status === "signed_in" && registration.planAccess === "disabled",
-			) === true
+			this.#authStorage.oauth
+				?.registrations(providerId)
+				.some(registration => registration.status === "signed_in" && registration.planAccess === "disabled") ===
+				true
 		);
 	}
 
@@ -511,8 +514,9 @@ export class OAuthSelectorComponent extends OverlayPanel {
 		const origin = this.#authStorage.keys.source(provider.id);
 		const state = this.#authState.get(provider.id);
 		const identityOnly = this.#hasIdentityOnlyLogin(provider.id);
-		const dot: TspTone =
-			identityOnly ? "warning" : state === "checking"
+		const dot: TspTone = identityOnly
+			? "warning"
+			: state === "checking"
 				? "pending"
 				: state === "invalid"
 					? "error"
@@ -524,11 +528,13 @@ export class OAuthSelectorComponent extends OverlayPanel {
 				? `env: ${origin.envVar}`
 				: ORIGIN_LABELS[origin.kind]
 			: undefined;
-		const detail = identityOnly ? "Signed in · plan usage disabled" : !source
-			? "Not configured"
-			: origin?.kind === "oauth"
-				? `Signed in · ${source}`
-				: `API key · ${source}`;
+		const detail = identityOnly
+			? "Signed in · plan usage disabled"
+			: !source
+				? "Not configured"
+				: origin?.kind === "oauth"
+					? `Signed in · ${source}`
+					: `API key · ${source}`;
 		const initials = provider.name
 			.split(/[^\p{L}\p{N}]+/u)
 			.filter(word => word.length > 0)

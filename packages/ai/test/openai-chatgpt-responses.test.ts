@@ -172,7 +172,11 @@ describe("Sign in with ChatGPT Responses contract", () => {
 			const calls = first.content.filter(block => block.type === "toolCall");
 			expect(calls).toMatchObject([
 				{ name: "read", arguments: { path: "notes.txt" } },
-				{ name: "apply_patch", arguments: { input: "*** Begin Patch\n*** End Patch" }, customWireName: "apply_patch" },
+				{
+					name: "apply_patch",
+					arguments: { input: "*** Begin Patch\n*** End Patch" },
+					customWireName: "apply_patch",
+				},
 			]);
 			const results: ToolResultMessage[] = calls.map(call => ({
 				role: "toolResult",
@@ -199,7 +203,10 @@ describe("Sign in with ChatGPT Responses contract", () => {
 				expect((request.input as Array<Record<string, unknown>>)[0]).toMatchObject({
 					type: "additional_tools",
 					role: "developer",
-					tools: [{ type: "function", name: "read" }, { type: "custom", name: "apply_patch" }],
+					tools: [
+						{ type: "function", name: "read" },
+						{ type: "custom", name: "apply_patch" },
+					],
 				});
 			}
 			const history = requests[1]!.input as Array<Record<string, unknown>>;
@@ -214,7 +221,11 @@ describe("Sign in with ChatGPT Responses contract", () => {
 				expect.objectContaining({ type: "function_call_output", call_id: "call_read", output: "Original notes" }),
 			);
 			expect(history).toContainEqual(
-				expect.objectContaining({ type: "custom_tool_call_output", call_id: "call_patch", output: "Patch applied" }),
+				expect.objectContaining({
+					type: "custom_tool_call_output",
+					call_id: "call_patch",
+					output: "Patch applied",
+				}),
 			);
 			expect(headers.map(header => header.get("authorization"))).toEqual([
 				"Bearer chatgpt-access-token",
@@ -226,7 +237,12 @@ describe("Sign in with ChatGPT Responses contract", () => {
 	});
 
 	it("keeps exact local tool choices and hosted web search declarations", () => {
-		const { params } = buildParams(makeModel(), context, { toolChoice: { type: "function", name: "read" } }, undefined);
+		const { params } = buildParams(
+			makeModel(),
+			context,
+			{ toolChoice: { type: "function", name: "read" } },
+			undefined,
+		);
 		expect(params.tool_choice).toEqual({ type: "function", name: "read" });
 		params.tools = [{ type: "web_search" }];
 		applyOpenAIChatGPTRequestContract(params);
@@ -323,17 +339,13 @@ describe("Sign in with ChatGPT Responses contract", () => {
 
 	it("does not send the OAuth bearer to a different base URL", async () => {
 		let fetchCount = 0;
-		const result = await streamOpenAIResponses(
-			{ ...makeModel(), baseUrl: "https://other.example/v1" },
-			context,
-			{
-				apiKey: "chatgpt-access-token",
-				fetch: async () => {
-					fetchCount++;
-					return sse(textEvents("Unexpected", "resp_unexpected"));
-				},
+		const result = await streamOpenAIResponses({ ...makeModel(), baseUrl: "https://other.example/v1" }, context, {
+			apiKey: "chatgpt-access-token",
+			fetch: async () => {
+				fetchCount++;
+				return sse(textEvents("Unexpected", "resp_unexpected"));
 			},
-		).result();
+		}).result();
 		expect(result.stopReason).toBe("error");
 		expect(result.errorMessage).toContain("https://api.openai.com/v1");
 		expect(fetchCount).toBe(0);
@@ -344,7 +356,11 @@ describe("Sign in with ChatGPT Responses contract", () => {
 		if (terminal === "failed") {
 			events.push({
 				type: "response.failed",
-				response: { id: "resp_partial", status: "failed", error: { code: "server_error", message: "Generation failed" } },
+				response: {
+					id: "resp_partial",
+					status: "failed",
+					error: { code: "server_error", message: "Generation failed" },
+				},
 			});
 		}
 		let fetchCount = 0;
@@ -383,7 +399,8 @@ describe("Sign in with ChatGPT Responses contract", () => {
 				retainConnection: true,
 			});
 			await lease.session.connection.connect(signal);
-			for await (const _event of lease.session.events(firstBody, { signal, chain: true })) {}
+			for await (const _event of lease.session.events(firstBody, { signal, chain: true })) {
+			}
 			lease.release();
 			const secondBody: ResponseCreateParamsBase = {
 				...firstBody,
@@ -407,7 +424,8 @@ describe("Sign in with ChatGPT Responses contract", () => {
 				retainConnection: true,
 			});
 			await secondLease.session.connection.connect(signal);
-			for await (const _event of secondLease.session.events(secondBody, { signal, chain: true })) {}
+			for await (const _event of secondLease.session.events(secondBody, { signal, chain: true })) {
+			}
 			secondLease.release();
 			expect(wire.requests[1]?.body.previous_response_id).toBe("resp_1");
 			expect(wire.requests[1]?.body.input).toEqual([{ role: "user", content: "Continue" }]);
@@ -419,7 +437,8 @@ describe("Sign in with ChatGPT Responses contract", () => {
 				retainConnection: true,
 			});
 			await changedLease.session.connection.connect(signal);
-			for await (const _event of changedLease.session.events(secondBody, { signal, chain: true })) {}
+			for await (const _event of changedLease.session.events(secondBody, { signal, chain: true })) {
+			}
 			changedLease.release();
 			expect(wire.requests[2]?.body.previous_response_id).toBeUndefined();
 			expect(wire.requests[2]?.body.input).toEqual(secondBody.input);

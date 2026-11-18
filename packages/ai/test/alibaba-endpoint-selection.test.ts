@@ -13,7 +13,8 @@ function registeredLogin(options: OAuthController) {
 
 async function loginAlibabaCodingPlan(options: OAuthController) {
 	const result = await registeredLogin(options);
-	if (typeof result === "string") throw new Error("Expected Alibaba Coding Plan OAuth credentials");
+	if (typeof result === "string" || "kind" in result)
+		throw new Error("Expected Alibaba Coding Plan OAuth credentials");
 	return result;
 }
 

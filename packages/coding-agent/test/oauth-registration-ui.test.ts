@@ -93,11 +93,7 @@ describe("registration login selection", () => {
 			removed: true,
 			remoteRevoked: false,
 		});
-		expect(calls).toEqual([
-			"revoke:openai-chatgpt:identity-only",
-			"refresh:openai-chatgpt:online",
-			"scoped-models",
-		]);
+		expect(calls).toEqual(["revoke:openai-chatgpt:identity-only", "refresh:openai-chatgpt:online", "scoped-models"]);
 		expect(await listLogoutAccounts(authStorage, "openai-chatgpt", "session")).toEqual([]);
 	});
 });

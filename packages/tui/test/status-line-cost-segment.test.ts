@@ -61,12 +61,10 @@ describe("cost status-line segment", () => {
 				renderSegment("cost", costCtx({ onAdvisorSubscriptionProbe: () => {}, ...options })).content,
 			);
 		expect(render({ model: chatGPTModel, usingSubscription: true, hasUnpricedUsage: true })).toBe("ChatGPT plan");
-		expect(
-			render({ model: chatGPTModel, usingSubscription: true, hasUnpricedUsage: true, cost: 0.75 }),
-		).toBe("$0.75 + ChatGPT plan");
-		expect(render({ model: apiModel, hasUnpricedUsage: true, cost: 0.75 })).toBe(
-			"$0.75 · contains unpriced usage",
+		expect(render({ model: chatGPTModel, usingSubscription: true, hasUnpricedUsage: true, cost: 0.75 })).toBe(
+			"$0.75 + ChatGPT plan",
 		);
+		expect(render({ model: apiModel, hasUnpricedUsage: true, cost: 0.75 })).toBe("$0.75 · contains unpriced usage");
 	});
 
 	// Regression for #10129: the advisor-subscription probe walks the full model

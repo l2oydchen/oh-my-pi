@@ -2184,7 +2184,10 @@ export class SelectorController {
 				const selected =
 					choices.length === 1
 						? choices[0].label
-						: await this.ctx.showHookSelector("Choose an account to sign in", choices.map(choice => choice.label));
+						: await this.ctx.showHookSelector(
+								"Choose an account to sign in",
+								choices.map(choice => choice.label),
+							);
 				if (selected === undefined) {
 					this.ctx.showStatus("Login cancelled");
 					return false;
@@ -2192,7 +2195,9 @@ export class SelectorController {
 				loginOptions = choices.find(choice => choice.label === selected)?.options;
 				if (!loginOptions) return false;
 			} catch (error) {
-				this.ctx.showError(`Could not load saved accounts: ${error instanceof Error ? error.message : String(error)}`);
+				this.ctx.showError(
+					`Could not load saved accounts: ${error instanceof Error ? error.message : String(error)}`,
+				);
 				return false;
 			}
 		}
@@ -2223,32 +2228,36 @@ export class SelectorController {
 		this.ctx.ui.setFocus(dialog);
 		this.ctx.ui.requestRender();
 		try {
-			const identity = await authStorage.oauth.login(providerId as OAuthProvider, {
-				signal: dialog.signal,
-				onBrowserSession: captureBrowserSession,
-				onAuth: (info: { url: string; launchUrl?: string; instructions?: string }) => {
-					// The dialog renders the full URL (SSH-safe copy target) and
-					// opens the browser best-effort.
-					dialog.showAuth(info.url, info.instructions, info.launchUrl);
+			const identity = await authStorage.oauth.login(
+				providerId as OAuthProvider,
+				{
+					signal: dialog.signal,
+					onBrowserSession: captureBrowserSession,
+					onAuth: (info: { url: string; launchUrl?: string; instructions?: string }) => {
+						// The dialog renders the full URL (SSH-safe copy target) and
+						// opens the browser best-effort.
+						dialog.showAuth(info.url, info.instructions, info.launchUrl);
+					},
+					onPrompt: prompt => dialog.showPrompt(prompt),
+					onProgress: (message: string) => {
+						dialog.showProgress(message);
+					},
+					// Paste-code providers (e.g. Codex) may need the user to paste the
+					// fallback redirect URL when the loopback callback can't complete
+					// (headless/remote/Windows). Mount a focused input in the dialog so
+					// the paste lands somewhere the OAuth flow consumes — the hidden
+					// editor's `/login <url>` path is unreachable while the dialog holds
+					// focus (#5339).
+					onManualCodeInput: useManualInput
+						? signal =>
+								dialog.showManualInput(
+									`Paste the authorization code (or full redirect URL), then press ${editorKey("tui.input.submit")}:`,
+									signal,
+								)
+						: undefined,
 				},
-				onPrompt: prompt => dialog.showPrompt(prompt),
-				onProgress: (message: string) => {
-					dialog.showProgress(message);
-				},
-				// Paste-code providers (e.g. Codex) may need the user to paste the
-				// fallback redirect URL when the loopback callback can't complete
-				// (headless/remote/Windows). Mount a focused input in the dialog so
-				// the paste lands somewhere the OAuth flow consumes — the hidden
-				// editor's `/login <url>` path is unreachable while the dialog holds
-				// focus (#5339).
-				onManualCodeInput: useManualInput
-					? signal =>
-							dialog.showManualInput(
-								`Paste the authorization code (or full redirect URL), then press ${editorKey("tui.input.submit")}:`,
-								signal,
-							)
-					: undefined,
-			}, loginOptions);
+				loginOptions,
+			);
 			// Scope the post-login refresh to the just-authenticated provider with an
 			// `online` strategy: the default all-provider `online-if-uncached` reuses
 			// a fresh authoritative cache row (e.g. an empty result fetched before
@@ -2279,7 +2288,10 @@ export class SelectorController {
 			if (identity?.planAccess === "disabled") {
 				block.addChild(
 					new Text(
-						theme.fg("warning", "ChatGPT plan usage is not enabled. Use /login to authorize it, or select an API model."),
+						theme.fg(
+							"warning",
+							"ChatGPT plan usage is not enabled. Use /login to authorize it, or select an API model.",
+						),
 						1,
 						0,
 					),

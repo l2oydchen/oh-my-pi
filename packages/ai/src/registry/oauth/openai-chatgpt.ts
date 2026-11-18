@@ -36,7 +36,10 @@ interface Endpoints {
 
 /** Error codes are safe to surface; response bodies can contain credentials and are never included. */
 export class ChatGPTTokenError extends Error {
-	constructor(readonly code: string, readonly status: number) {
+	constructor(
+		readonly code: string,
+		readonly status: number,
+	) {
 		super(`ChatGPT OAuth token request failed (${code}, HTTP ${status})`);
 		this.name = "ChatGPTTokenError";
 	}
@@ -95,17 +98,25 @@ export function parseEarliestRefreshAt(value: unknown): number | undefined {
 
 export function parseChatGPTTokenResponse(raw: unknown, previousScopes: readonly string[] = []): OAuthTokenResponse {
 	const data = object(raw);
-	if (data.token_type !== undefined && (typeof data.token_type !== "string" || data.token_type.toLowerCase() !== "bearer")) {
+	if (
+		data.token_type !== undefined &&
+		(typeof data.token_type !== "string" || data.token_type.toLowerCase() !== "bearer")
+	) {
 		throw new Error("ChatGPT OAuth returned an unsupported token type");
 	}
-	if (data.scope !== undefined && typeof data.scope !== "string") throw new Error("ChatGPT OAuth returned invalid scopes");
+	if (data.scope !== undefined && typeof data.scope !== "string")
+		throw new Error("ChatGPT OAuth returned invalid scopes");
 	const expiresIn = data.expires_in;
 	return {
 		access: optionalString(data.access_token),
 		refresh: optionalString(data.refresh_token),
 		idToken: optionalString(data.id_token),
-		expires: typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn > 0 ? Date.now() + expiresIn * 1_000 : undefined,
-		scopes: typeof data.scope === "string" ? [...new Set(data.scope.split(/\s+/).filter(Boolean))] : [...previousScopes],
+		expires:
+			typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn > 0
+				? Date.now() + expiresIn * 1_000
+				: undefined,
+		scopes:
+			typeof data.scope === "string" ? [...new Set(data.scope.split(/\s+/).filter(Boolean))] : [...previousScopes],
 		earliestRefreshAt: parseEarliestRefreshAt(data.earliest_refresh_at),
 	};
 }
@@ -162,10 +173,15 @@ export async function verifyChatGPTIdentity(
 		requiredClaims: ["iss", "sub", "aud", "exp", "iat", ...(context.requireNonce ? ["nonce"] : [])],
 		clockTolerance: 30,
 	});
-	if (typeof payload.sub !== "string" || !payload.sub.trim() || (context.subject !== undefined && payload.sub !== context.subject)) {
+	if (
+		typeof payload.sub !== "string" ||
+		!payload.sub.trim() ||
+		(context.subject !== undefined && payload.sub !== context.subject)
+	) {
 		throw new Error("ChatGPT sign-in returned a different account; add it as a separate account");
 	}
-	if (typeof payload.iat !== "number" || payload.iat > Date.now() / 1_000 + 30) throw new Error("ChatGPT identity was issued in the future");
+	if (typeof payload.iat !== "number" || payload.iat > Date.now() / 1_000 + 30)
+		throw new Error("ChatGPT identity was issued in the future");
 	if ((context.requireNonce || payload.nonce !== undefined) && payload.nonce !== context.nonce) {
 		throw new Error("ChatGPT identity nonce did not match");
 	}
@@ -211,8 +227,14 @@ export class OpenAIChatGPTFlow extends OAuthCallbackFlow<OAuthRegistrationLoginR
 	issuedClientId?: string;
 
 	constructor(controller: OAuthController) {
-		super(controller, { preferredPort: 1455, callbackHostname: "127.0.0.1", callbackPath: "/auth/callback", privateAuthorizationUrl: true });
-		if (!controller.registration) throw new AIError.ConfigurationError("ChatGPT sign-in requires local credential storage");
+		super(controller, {
+			preferredPort: 1455,
+			callbackHostname: "127.0.0.1",
+			callbackPath: "/auth/callback",
+			privateAuthorizationUrl: true,
+		});
+		if (!controller.registration)
+			throw new AIError.ConfigurationError("ChatGPT sign-in requires local credential storage");
 		this.#context = controller.registration;
 	}
 
@@ -242,13 +264,14 @@ export class OpenAIChatGPTFlow extends OAuthCallbackFlow<OAuthRegistrationLoginR
 		return { url: url.href };
 	}
 
-	validateCallback(url: URL, expectedState: string): CallbackResult {
+	override validateCallback(url: URL, expectedState: string): CallbackResult {
 		const state = url.searchParams.get("state");
 		if (state !== expectedState) throw new Error("ChatGPT callback state did not match");
 		const code = url.searchParams.get("code");
 		if (!code) throw new Error("ChatGPT callback omitted its authorization code");
 		const returnedClientId = optionalString(url.searchParams.get("client_id"));
-		if (!this.#context.clientId && !returnedClientId) throw new Error("ChatGPT callback omitted its registered client ID");
+		if (!this.#context.clientId && !returnedClientId)
+			throw new Error("ChatGPT callback omitted its registered client ID");
 		if (this.#context.clientId && returnedClientId && returnedClientId !== this.#context.clientId) {
 			throw new Error("ChatGPT callback client ID did not match the saved registration");
 		}
@@ -258,27 +281,63 @@ export class OpenAIChatGPTFlow extends OAuthCallbackFlow<OAuthRegistrationLoginR
 		return { code, state, clientId };
 	}
 
-	parseManualCallback(input: string, expectedState: string, redirectUri: string): CallbackResult | null {
+	override parseManualCallback(input: string, expectedState: string, redirectUri: string): CallbackResult | null {
 		let url: URL;
-		try { url = new URL(input.trim()); } catch { return null; }
+		try {
+			url = new URL(input.trim());
+		} catch {
+			return null;
+		}
 		const expected = new URL(redirectUri);
-		if (url.origin !== expected.origin || url.pathname !== expected.pathname || url.hash || url.searchParams.get("state") !== expectedState) return null;
+		if (
+			url.origin !== expected.origin ||
+			url.pathname !== expected.pathname ||
+			url.hash ||
+			url.searchParams.get("state") !== expectedState
+		)
+			return null;
 		if (url.searchParams.has("error")) throw new Error("ChatGPT authorization was declined");
 		return this.validateCallback(url, expectedState);
 	}
 
-	async exchangeToken(code: string, _state: string, redirectUri: string, callback?: CallbackResult): Promise<OAuthRegistrationLoginResult> {
+	async exchangeToken(
+		code: string,
+		_state: string,
+		redirectUri: string,
+		callback?: CallbackResult,
+	): Promise<OAuthRegistrationLoginResult> {
 		const clientId = callback?.clientId;
-		if (!clientId || !this.#endpoints || !this.#verifier) throw new Error("ChatGPT authorization context is incomplete");
+		if (!clientId || !this.#endpoints || !this.#verifier)
+			throw new Error("ChatGPT authorization context is incomplete");
 		const fetchImpl = this.ctrl.fetch ?? fetch;
-		const tokens = parseChatGPTTokenResponse(await exchange(this.#endpoints.token, {
-			grant_type: "authorization_code", code, client_id: clientId, code_verifier: this.#verifier,
-			redirect_uri: redirectUri, resource: RESOURCE,
-		}, fetchImpl, this.ctrl.signal));
+		const tokens = parseChatGPTTokenResponse(
+			await exchange(
+				this.#endpoints.token,
+				{
+					grant_type: "authorization_code",
+					code,
+					client_id: clientId,
+					code_verifier: this.#verifier,
+					redirect_uri: redirectUri,
+					resource: RESOURCE,
+				},
+				fetchImpl,
+				this.ctrl.signal,
+			),
+		);
 		if (!tokens.idToken) throw new Error("ChatGPT authorization omitted its identity token");
-		const identity = await verifyChatGPTIdentity(tokens.idToken, {
-			clientId, nonce: this.#nonce, requireNonce: true, subject: this.#context.subject,
-		}, fetchImpl, this.ctrl.signal, this.#endpoints);
+		const identity = await verifyChatGPTIdentity(
+			tokens.idToken,
+			{
+				clientId,
+				nonce: this.#nonce,
+				requireNonce: true,
+				subject: this.#context.subject,
+			},
+			fetchImpl,
+			this.ctrl.signal,
+			this.#endpoints,
+		);
 		const registration = {
 			...this.#context,
 			...identity,
@@ -287,7 +346,8 @@ export class OpenAIChatGPTFlow extends OAuthCallbackFlow<OAuthRegistrationLoginR
 			generation: this.#context.generation + 1,
 		};
 		return {
-			kind: "registered-oauth", registration,
+			kind: "registered-oauth",
+			registration,
 			identity: { ...tokens, idToken: tokens.idToken, authorizationNonce: this.#nonce },
 			credentials: completeCredentials(tokens, registration, this.#nonce),
 		};
@@ -299,9 +359,18 @@ export async function loginOpenAIChatGPT(controller: OAuthController): Promise<O
 	try {
 		return await flow.login();
 	} catch (error) {
-		if (!(error instanceof ChatGPTTokenError) || error.code !== "invalid_grant" || !flow.issuedClientId || !controller.registration) throw error;
+		if (
+			!(error instanceof ChatGPTTokenError) ||
+			error.code !== "invalid_grant" ||
+			!flow.issuedClientId ||
+			!controller.registration
+		)
+			throw error;
 		controller.onProgress?.("The authorization code expired. Opening a fresh sign-in with the same registration...");
-		flow = new OpenAIChatGPTFlow({ ...controller, registration: { ...controller.registration, clientId: flow.issuedClientId } });
+		flow = new OpenAIChatGPTFlow({
+			...controller,
+			registration: { ...controller.registration, clientId: flow.issuedClientId },
+		});
 		return flow.login();
 	}
 }
@@ -323,22 +392,48 @@ export async function refreshOpenAIChatGPT(
 			throw new Error("ChatGPT has not yet allowed this grant to refresh; retry after its refresh window opens");
 		}
 		const discovery = await endpoints(fetchImpl, signal);
-		tokens = parseChatGPTTokenResponse(await exchange(discovery.token, {
-			grant_type: "refresh_token", client_id: clientId, refresh_token: credentials.refresh, resource: RESOURCE,
-		}, fetchImpl, signal), credentials.scopes);
+		tokens = parseChatGPTTokenResponse(
+			await exchange(
+				discovery.token,
+				{
+					grant_type: "refresh_token",
+					client_id: clientId,
+					refresh_token: credentials.refresh,
+					resource: RESOURCE,
+				},
+				fetchImpl,
+				signal,
+			),
+			credentials.scopes,
+		);
 		tokens.refresh ??= credentials.refresh;
 		// A rotating refresh token must survive a crash or a JWKS/network failure after the exchange.
 		await context.checkpoint(tokens);
 	}
 	let email = credentials.email;
 	if (tokens.idToken) {
-		const identity = await verifyChatGPTIdentity(tokens.idToken, { clientId, nonce: authorizationNonce, requireNonce: false, subject }, fetchImpl, signal);
+		const identity = await verifyChatGPTIdentity(
+			tokens.idToken,
+			{ clientId, nonce: authorizationNonce, requireNonce: false, subject },
+			fetchImpl,
+			signal,
+		);
 		email = identity.email ?? email;
 	}
 	if (!tokens.scopes.includes(DIRECT_SCOPE)) throw new ChatGPTPlanAccessDisabled(tokens);
-	const result = completeCredentials({ ...tokens, idToken: tokens.idToken ?? credentials.idToken }, {
-		registrationId, generation: credentials.registrationGeneration ?? 0, hostId, clientId, issuer, subject, email,
-	}, authorizationNonce);
+	const result = completeCredentials(
+		{ ...tokens, idToken: tokens.idToken ?? credentials.idToken },
+		{
+			registrationId,
+			generation: credentials.registrationGeneration ?? 0,
+			hostId,
+			clientId,
+			issuer,
+			subject,
+			email,
+		},
+		authorizationNonce,
+	);
 	if (!result) throw new Error("ChatGPT plan authorization is unavailable");
 	return { ...result, pendingRotation: undefined };
 }
@@ -357,9 +452,15 @@ export async function revokeOpenAIChatGPT(
 		for (let attempt = 0; attempt < 2; attempt++) {
 			try {
 				const response = await fetchImpl(discovery.revocation, {
-					method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-					body: new URLSearchParams({ token: refreshToken, token_type_hint: "refresh_token", client_id: clientId }),
-					signal: bounded, redirect: "error",
+					method: "POST",
+					headers: { "Content-Type": "application/x-www-form-urlencoded" },
+					body: new URLSearchParams({
+						token: refreshToken,
+						token_type_hint: "refresh_token",
+						client_id: clientId,
+					}),
+					signal: bounded,
+					redirect: "error",
 				});
 				if (response.ok) return true;
 				if (response.status < 500) return false;
@@ -367,6 +468,8 @@ export async function revokeOpenAIChatGPT(
 				if (bounded.aborted) return false;
 			}
 		}
-	} catch { return false; }
+	} catch {
+		return false;
+	}
 	return false;
 }

@@ -166,7 +166,11 @@ export interface OAuthProviderInterface {
 	readonly sourceId?: string;
 	login(callbacks: OAuthLoginCallbacks): Promise<OAuthLoginResult>;
 	/** Refresh a stored grant; the signal bounds provider network work to refresh ownership. */
-	refreshToken?(credentials: OAuthCredentials, signal?: AbortSignal, context?: OAuthRefreshContext): Promise<OAuthCredentials>;
+	refreshToken?(
+		credentials: OAuthCredentials,
+		signal?: AbortSignal,
+		context?: OAuthRefreshContext,
+	): Promise<OAuthCredentials>;
 	getApiKey?(credentials: OAuthCredentials): string;
 	/** Store resulting OAuth credentials under a different provider id. */
 	readonly storeCredentialsAs?: string;

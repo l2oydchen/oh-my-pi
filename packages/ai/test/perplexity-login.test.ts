@@ -23,7 +23,7 @@ async function loginPerplexity(callbacks: OAuthController): Promise<OAuthCredent
 		onAuth: callbacks.onAuth ?? (() => {}),
 		onPrompt: callbacks.onPrompt ?? (async () => ""),
 	});
-	if (typeof result === "string") throw new Error("expected Perplexity OAuth credentials");
+	if (typeof result === "string" || "kind" in result) throw new Error("expected Perplexity OAuth credentials");
 	return result;
 }
 

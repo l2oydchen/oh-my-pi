@@ -161,7 +161,11 @@ export async function runTerminalOAuthLogin(
 		const index =
 			choices.length === 1
 				? 0
-				: await pickIndex(rl, "Choose an account to sign in:", choices.map(choice => choice.label));
+				: await pickIndex(
+						rl,
+						"Choose an account to sign in:",
+						choices.map(choice => choice.label),
+					);
 		loginOptions = choices[index].options;
 	}
 	// Only paste-code providers (fixed non-loopback redirect, e.g. GitLab Duo
@@ -172,38 +176,42 @@ export async function runTerminalOAuthLogin(
 	// independently refuses to synthesize the default prompt
 	// for non-paste-code providers, so this is defense-in-depth on the same gate.
 	const usesManualInput = PASTE_CODE_LOGIN_PROVIDERS.has(provider);
-	return storage.oauth.login(provider, {
-		onAuth({ url, launchUrl, instructions }) {
-			process.stdout.write("\nOpen this URL in your browser:\n");
-			// Full URL first so the CLI works from any machine, including SSH
-			// sessions where a `launchUrl` (loopback `/launch` on the OMP
-			// host) would resolve against the caller's browser and fail.
-			// Headless capture is unaffected: it reads the first URL line.
-			process.stdout.write(`${url}\n`);
-			if (launchUrl && launchUrl !== url) {
-				// Local shortcut for the machine running OMP. Terminals or
-				// screen-scrapers narrower than the full URL still get an
-				// unbroken copy target here.
-				process.stdout.write(`Local shortcut (this machine only): ${launchUrl}\n`);
-			}
-			if (instructions) process.stdout.write(`${instructions}\n`);
-			process.stdout.write("\n");
-			if (options.openBrowser) openPath(url);
-		},
-		onProgress(message) {
-			process.stdout.write(`${message}\n`);
-		},
-		onPrompt(p) {
-			return ask(`${p.message}${p.placeholder ? ` (${p.placeholder})` : ""}:`);
-		},
-		...(usesManualInput
-			? {
-					onManualCodeInput(signal) {
-						return ask("Paste the authorization code (or full redirect URL):", signal);
-					},
+	return storage.oauth.login(
+		provider,
+		{
+			onAuth({ url, launchUrl, instructions }) {
+				process.stdout.write("\nOpen this URL in your browser:\n");
+				// Full URL first so the CLI works from any machine, including SSH
+				// sessions where a `launchUrl` (loopback `/launch` on the OMP
+				// host) would resolve against the caller's browser and fail.
+				// Headless capture is unaffected: it reads the first URL line.
+				process.stdout.write(`${url}\n`);
+				if (launchUrl && launchUrl !== url) {
+					// Local shortcut for the machine running OMP. Terminals or
+					// screen-scrapers narrower than the full URL still get an
+					// unbroken copy target here.
+					process.stdout.write(`Local shortcut (this machine only): ${launchUrl}\n`);
 				}
-			: undefined),
-	}, loginOptions);
+				if (instructions) process.stdout.write(`${instructions}\n`);
+				process.stdout.write("\n");
+				if (options.openBrowser) openPath(url);
+			},
+			onProgress(message) {
+				process.stdout.write(`${message}\n`);
+			},
+			onPrompt(p) {
+				return ask(`${p.message}${p.placeholder ? ` (${p.placeholder})` : ""}:`);
+			},
+			...(usesManualInput
+				? {
+						onManualCodeInput(signal) {
+							return ask("Paste the authorization code (or full redirect URL):", signal);
+						},
+					}
+				: undefined),
+		},
+		loginOptions,
+	);
 }
 
 /**

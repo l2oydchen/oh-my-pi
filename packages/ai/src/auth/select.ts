@@ -637,8 +637,7 @@ export class CredentialSelector {
 				: undefined;
 		const sessionPreferredCanRefreshOrUse =
 			sessionPreferredCredential !== undefined &&
-			(sessionPreferredCredential.refresh.trim().length > 0 ||
-				isOAuthCredentialFresh(sessionPreferredCredential));
+			(sessionPreferredCredential.refresh.trim().length > 0 || isOAuthCredentialFresh(sessionPreferredCredential));
 		// Skip ranking when the session already has a working preferred credential and its prompt
 		// cache may still be warm. Providers without a verified idle boundary retain indefinite
 		// stickiness rather than risk switching while their prompt cache remains warm. New sessions
@@ -823,11 +822,7 @@ export class CredentialSelector {
 				const hasFreshAccess = isOAuthCredentialFresh(candidate.selection.credential);
 				if ((!force || syncedPeerCredential) && hasFreshAccess) return;
 				const latestCredential = this.#deps.pool.credentials(provider)[candidate.selection.index];
-				if (
-					!force &&
-					latestCredential?.type === "oauth" &&
-					isOAuthCredentialFresh(latestCredential)
-				) {
+				if (!force && latestCredential?.type === "oauth" && isOAuthCredentialFresh(latestCredential)) {
 					candidate.selection.credential = latestCredential;
 					return;
 				}
@@ -1081,8 +1076,14 @@ export class CredentialSelector {
 			blockScopes,
 			allowFallback = true,
 		} = usageOptions;
-		if (selection.credential.authMode === "chatgpt-siwc" && options?.baseUrl !== undefined && !isOpenAIChatGPTBaseUrl(options.baseUrl)) {
-			throw new AIError.ConfigurationError("ChatGPT plan credentials can only authenticate requests to https://api.openai.com/v1");
+		if (
+			selection.credential.authMode === "chatgpt-siwc" &&
+			options?.baseUrl !== undefined &&
+			!isOpenAIChatGPTBaseUrl(options.baseUrl)
+		) {
+			throw new AIError.ConfigurationError(
+				"ChatGPT plan credentials can only authenticate requests to https://api.openai.com/v1",
+			);
 		}
 		if (
 			!allowBlocked &&

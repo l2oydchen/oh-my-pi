@@ -92,14 +92,20 @@ export function toLogoutRegistrationAccounts(
 ): LogoutAccount[] {
 	return registrations
 		.filter(registration => registration.status !== "signed_out")
-		.map(registration => ({
-			registrationId: registration.registrationId,
-			provider,
-			label: formatOAuthRegistrationLabel(registration),
-			detail: registration.planAccess === "disabled" ? "identity sign-in · plan usage disabled" : "ChatGPT plan usage",
-			type: "oauth",
-			active: activeIdentity?.registrationId === registration.registrationId,
-		}) satisfies LogoutAccount);
+		.map(
+			registration =>
+				({
+					registrationId: registration.registrationId,
+					provider,
+					label: formatOAuthRegistrationLabel(registration),
+					detail:
+						registration.planAccess === "disabled"
+							? "identity sign-in · plan usage disabled"
+							: "ChatGPT plan usage",
+					type: "oauth",
+					active: activeIdentity?.registrationId === registration.registrationId,
+				}) satisfies LogoutAccount,
+		);
 }
 
 export function toLogoutAccounts(
@@ -140,12 +146,14 @@ export async function listLogoutAccounts(
 	const activeIdentity = authStorage.oauth.identity(provider, sessionId);
 	const registrations = authStorage.oauth.registrations(provider);
 	const registeredIds = new Set(registrations.map(registration => registration.registrationId));
-	const credentials = authStorage.credentials.list(provider).filter(
-		row =>
-			row.credential.type !== "oauth" ||
-			row.credential.registrationId === undefined ||
-			!registeredIds.has(row.credential.registrationId),
-	);
+	const credentials = authStorage.credentials
+		.list(provider)
+		.filter(
+			row =>
+				row.credential.type !== "oauth" ||
+				row.credential.registrationId === undefined ||
+				!registeredIds.has(row.credential.registrationId),
+		);
 	const credentialsToLogout = toLogoutAccounts(provider, credentials, {
 		activeIdentity,
 		activeApiKey: authStorage.keys.source(provider)?.kind === "api_key",

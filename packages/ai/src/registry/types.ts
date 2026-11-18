@@ -87,7 +87,11 @@ export interface ProviderDefinition {
 	/** Interactive login; flows that need `onPrompt`/`onAuth` reject a bare controller at runtime. */
 	readonly login?: (callbacks: OAuthController) => Promise<OAuthLoginResult>;
 	/** Refresh a stored grant; the signal bounds provider network work to refresh ownership. */
-	readonly refreshToken?: (credentials: OAuthCredentials, signal?: AbortSignal, context?: OAuthRefreshContext) => Promise<OAuthCredentials>;
+	readonly refreshToken?: (
+		credentials: OAuthCredentials,
+		signal?: AbortSignal,
+		context?: OAuthRefreshContext,
+	) => Promise<OAuthCredentials>;
 	readonly getApiKey?: (credentials: OAuthCredentials) => string;
 	/** Store OAuth credentials under a different provider id (e.g. `openai-codex-device` ⇒ `openai-codex`). */
 	readonly storeCredentialsAs?: string;

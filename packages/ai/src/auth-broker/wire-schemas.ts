@@ -52,8 +52,33 @@ import type {
 
 // ─── Credential payloads ─────────────────────────────────────────────────────
 
+// Mirror optional credential fields for schema/type compatibility. Provider
+// policy still excludes local-only grants from broker uploads and snapshots.
+const registrationCredentialFields = {
+	"authMode?": "'chatgpt-siwc'",
+	"registrationId?": "string",
+	"registrationGeneration?": "number",
+	"clientId?": "string",
+	"hostId?": "string",
+	"issuer?": "string",
+	"subject?": "string",
+	"scopes?": "string[]",
+	"idToken?": "string",
+	"authorizationNonce?": "string",
+	"earliestRefreshAt?": "number",
+	"pendingRotation?": type({
+		"access?": "string",
+		"refresh?": "string",
+		"expires?": "number",
+		"idToken?": "string",
+		scopes: "string[]",
+		"earliestRefreshAt?": "number",
+	}),
+} as const;
+
 /** Real OAuth credential (broker-side) — refresh token is the actual upstream value. */
 export const oauthCredentialSchema: FluentType<OAuthCredential> = type({
+	...registrationCredentialFields,
 	"apiEndpoint?": "string",
 	type: "'oauth'",
 	refresh: type("string").narrow(
@@ -77,6 +102,7 @@ export const oauthCredentialSchema: FluentType<OAuthCredential> = type({
 
 /** OAuth credential as it appears in broker snapshots — refresh replaced with sentinel. */
 export const remoteOauthCredentialSchema: FluentType<RemoteOAuthCredential> = type({
+	...registrationCredentialFields,
 	"apiEndpoint?": "string",
 	type: "'oauth'",
 	refresh: type.enumerated(REMOTE_REFRESH_SENTINEL),

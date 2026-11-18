@@ -20,7 +20,11 @@ import {
 } from "./common";
 
 type RequestRefresh = Extract<CompiledRefresh, { kind: "request" }>;
-type Refresher = (credentials: OAuthCredentials, signal?: AbortSignal, context?: OAuthRefreshContext) => Promise<OAuthCredentials>;
+type Refresher = (
+	credentials: OAuthCredentials,
+	signal?: AbortSignal,
+	context?: OAuthRefreshContext,
+) => Promise<OAuthCredentials>;
 
 async function loginClient(policy: CompiledAuthProvider, signal?: AbortSignal) {
 	const login = policy.login;

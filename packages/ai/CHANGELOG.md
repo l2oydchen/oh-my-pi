@@ -6,6 +6,10 @@
 
 - Added local Sign in with ChatGPT authentication, renewable account registrations, and public Responses API support alongside existing API-key providers.
 
+### Fixed
+
+- Fixed Antigravity token refresh compatibility with the durable OAuth refresh context.
+
 ## [18.20.3] - 2026-11-16
 
 ### Breaking Changes

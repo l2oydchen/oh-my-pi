@@ -157,7 +157,12 @@ export interface OAuthRegistrationStore {
 	saveOAuthRegistrationLogin(provider: string, result: OAuthRegistrationLoginResult): void;
 	beginOAuthRegistrationLogout(provider: string, registrationId: string): StoredOAuthRegistration | undefined;
 	finishOAuthRegistrationLogout(provider: string, registrationId: string, generation: number): void;
-	disableOAuthRegistrationPlan(credentialId: number, expectedData: string, tokens: OAuthTokenResponse, lease: CredentialRefreshLeaseFence): boolean;
+	disableOAuthRegistrationPlan(
+		credentialId: number,
+		expectedData: string,
+		tokens: OAuthTokenResponse,
+		lease: CredentialRefreshLeaseFence,
+	): boolean;
 }
 
 /** Usage history and client-observed request accounting. */
@@ -274,12 +279,18 @@ export interface AuthCredentialStore
 		Partial<UsageLedgerStore>,
 		Partial<CredentialUpstream> {}
 
-export function hasOAuthRegistrations(store: AuthCredentialStore): store is AuthCredentialStore & OAuthRegistrationStore {
-	return typeof store.listOAuthRegistrations === "function" && typeof store.saveOAuthRegistrationLogin === "function" &&
+export function hasOAuthRegistrations(
+	store: AuthCredentialStore,
+): store is AuthCredentialStore & OAuthRegistrationStore {
+	return (
+		typeof store.listOAuthRegistrations === "function" &&
+		typeof store.saveOAuthRegistrationLogin === "function" &&
 		typeof store.getCredentialRefreshLeaseHolder === "function" &&
 		typeof store.getOAuthRegistrationCredential === "function" &&
-		typeof store.beginOAuthRegistrationLogout === "function" && typeof store.finishOAuthRegistrationLogout === "function" &&
-		typeof store.disableOAuthRegistrationPlan === "function";
+		typeof store.beginOAuthRegistrationLogout === "function" &&
+		typeof store.finishOAuthRegistrationLogout === "function" &&
+		typeof store.disableOAuthRegistrationPlan === "function"
+	);
 }
 
 /** Narrow stores that implement the complete durable refresh-lease concern. */

@@ -26,7 +26,9 @@ describe("persistent OAuth installation identity", () => {
 
 	test("refuses the legacy in-memory fallback when persistence fails", () => {
 		const failure = Object.assign(new Error("fixture write denied"), { code: "EACCES" });
-		vi.spyOn(fs, "openSync").mockImplementation(() => { throw failure; });
+		vi.spyOn(fs, "openSync").mockImplementation(() => {
+			throw failure;
+		});
 		getInstallId();
 		expect(() => getPersistentInstallId()).toThrow("fixture write denied");
 	});

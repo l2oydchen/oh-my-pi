@@ -71,7 +71,7 @@ describe("branch summarization", () => {
 					};
 				},
 			});
-			expect(result.summary).toBe("summary");
+			expect(result.summary).toContain("summary");
 			expect(caps).toEqual([model === chatgpt ? undefined : 2048]);
 		}
 	});

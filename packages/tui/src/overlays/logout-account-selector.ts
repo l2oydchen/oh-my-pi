@@ -23,13 +23,12 @@ interface LogoutAccountLabel {
 }
 
 export type LogoutAccount = LogoutAccountLabel &
-	(
-		| { credentialId: number; registrationId?: never }
-		| { registrationId: string; credentialId?: never }
-	);
+	({ credentialId: number; registrationId?: never } | { registrationId: string; credentialId?: never });
 
 function accountKey(account: LogoutAccount): string {
-	return account.registrationId === undefined ? String(account.credentialId) : `registration:${account.registrationId}`;
+	return account.registrationId === undefined
+		? String(account.credentialId)
+		: `registration:${account.registrationId}`;
 }
 
 /** Account picker for `/logout` after the provider has been selected. */

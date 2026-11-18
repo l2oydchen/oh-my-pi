@@ -1146,9 +1146,17 @@ export interface OAuthApi {
 	 * surface which account — and for Anthropic, which organization — the
 	 * login registered.
 	 */
-	login(provider: OAuthProviderId, ctrl: OAuthLoginController, options?: OAuthLoginOptions): Promise<OAuthLoginIdentity | undefined>;
+	login(
+		provider: OAuthProviderId,
+		ctrl: OAuthLoginController,
+		options?: OAuthLoginOptions,
+	): Promise<OAuthLoginIdentity | undefined>;
 	registrations(provider: string): OAuthRegistrationSummary[];
-	logoutRegistration(provider: string, registrationId: string, signal?: AbortSignal): Promise<{ remoteRevoked: boolean }>;
+	logoutRegistration(
+		provider: string,
+		registrationId: string,
+		signal?: AbortSignal,
+	): Promise<{ remoteRevoked: boolean }>;
 	/**
 	 * Resolve the OAuth credential for `provider`, refreshing through the same
 	 * pipeline as {@link AuthStorage.keys.get} but returning the refreshed

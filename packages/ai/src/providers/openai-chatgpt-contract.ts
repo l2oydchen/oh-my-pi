@@ -86,7 +86,7 @@ export function validateOpenAIChatGPTOptions(
 	options:
 		| (Pick<StreamOptions, "temperature" | "topP" | "maxTokens" | "storeResponses"> & {
 				maxTokensExplicit?: boolean;
-			})
+		  })
 		| undefined,
 ): void {
 	if (options?.temperature !== undefined) unsupported("temperature", "options");
@@ -133,7 +133,8 @@ export function validateOpenAIChatGPTOverrides(body: unknown, source: string): v
 		}
 		for (const item of body.input) {
 			if (!isRecord(item)) continue;
-			if (item.role === "system") unsupported("system input messages; use instructions or developer messages", source);
+			if (item.role === "system")
+				unsupported("system input messages; use instructions or developer messages", source);
 			if (item.type === "additional_tools") validateTools(item.tools, source, false);
 			if (Array.isArray(item.content)) {
 				for (const content of item.content) {

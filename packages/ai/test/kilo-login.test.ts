@@ -31,7 +31,7 @@ describe("kilo oauth login", () => {
 
 		const onAuth = vi.fn();
 		const credentials = await loginKilo({ onAuth, fetch: fetchMock });
-		if (typeof credentials === "string") throw new Error("Expected Kilo OAuth credentials");
+		if (typeof credentials === "string" || "kind" in credentials) throw new Error("Expected Kilo OAuth credentials");
 
 		expect(onAuth).toHaveBeenCalledWith({
 			url: "https://kilo.ai/verify",

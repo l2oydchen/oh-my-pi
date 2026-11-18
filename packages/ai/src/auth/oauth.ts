@@ -123,7 +123,7 @@ export class OAuthAccounts implements OAuthApi {
 			await this.#deps.pool.storeLoginApiKey(def.storeCredentialsAs ?? provider, result);
 			return { type: "api_key" };
 		}
-		if ("kind" in result && result.kind === "registered-oauth") {
+		if ("kind" in result) {
 			const store = this.#deps.store;
 			if (!hasOAuthRegistrations(store)) {
 				throw new AIError.ConfigurationError("ChatGPT sign-in requires local credential storage");
@@ -201,11 +201,15 @@ export class OAuthAccounts implements OAuthApi {
 				registrationId = selection > 0 ? registrations[selection - 1].registrationId : undefined;
 			}
 		}
-		if (!registrationId) return { registrationId: crypto.randomUUID(), generation: 0, hostId, intent: options?.intent };
+		if (!registrationId)
+			return { registrationId: crypto.randomUUID(), generation: 0, hostId, intent: options?.intent };
 		const registration = registrations.find(item => item.registrationId === registrationId);
-		if (!registration) throw new AIError.ConfigurationError("ChatGPT registration was not found on this installation");
+		if (!registration)
+			throw new AIError.ConfigurationError("ChatGPT registration was not found on this installation");
 		if (registration.status === "signing_out") {
-			throw new AIError.ConfigurationError("This ChatGPT account is signing out; finish logout before signing in again");
+			throw new AIError.ConfigurationError(
+				"This ChatGPT account is signing out; finish logout before signing in again",
+			);
 		}
 		const stored = store.getOAuthRegistrationCredential(provider, registrationId)?.credential;
 		return {
@@ -272,7 +276,9 @@ export class OAuthAccounts implements OAuthApi {
 			// A current refresh owner may checkpoint after logout starts. Read its newest token only after ownership settles.
 			const latest = store.getOAuthRegistrationCredential(provider, registrationId)?.credential;
 			const refresh =
-				latest?.type === "oauth" ? latest.pendingRotation?.refresh ?? latest.refresh : registration.identity?.refresh;
+				latest?.type === "oauth"
+					? (latest.pendingRotation?.refresh ?? latest.refresh)
+					: registration.identity?.refresh;
 			remoteRevoked = await revokeOpenAIChatGPT(registration.clientId, refresh, signal);
 			remoteRevoked &&= acquired;
 		} finally {
@@ -317,7 +323,10 @@ export class OAuthAccounts implements OAuthApi {
 		const { credential, credentialId } = resolved;
 		return {
 			accessToken: credential.access,
-			registrationId: credential.registrationId, clientId: credential.clientId, issuer: credential.issuer, subject: credential.subject,
+			registrationId: credential.registrationId,
+			clientId: credential.clientId,
+			issuer: credential.issuer,
+			subject: credential.subject,
 			credentialId,
 			accountId: credential.accountId,
 			email: credential.email,
@@ -388,7 +397,10 @@ export class OAuthAccounts implements OAuthApi {
 			const { credential, apiKey } = resolved;
 			return {
 				ok: true,
-				registrationId: credential.registrationId, clientId: credential.clientId, issuer: credential.issuer, subject: credential.subject,
+				registrationId: credential.registrationId,
+				clientId: credential.clientId,
+				issuer: credential.issuer,
+				subject: credential.subject,
 				credentialId: selection.credentialId,
 				accessToken: credential.access,
 				apiKey,
@@ -440,8 +452,10 @@ export class OAuthAccounts implements OAuthApi {
 			const active = selection.credentialId === activeCredentialId;
 			return {
 				position,
-				registrationId: selection.credential.registrationId, clientId: selection.credential.clientId,
-				issuer: selection.credential.issuer, subject: selection.credential.subject,
+				registrationId: selection.credential.registrationId,
+				clientId: selection.credential.clientId,
+				issuer: selection.credential.issuer,
+				subject: selection.credential.subject,
 				credentialId: selection.credentialId,
 				accountId: selection.credential.accountId,
 				email: selection.credential.email,
@@ -511,7 +525,12 @@ export class OAuthAccounts implements OAuthApi {
 	identity(provider: string, sessionId?: string): OAuthAccountIdentity | undefined {
 		const preferred = this.#deps.affinity.activeOAuth(provider, sessionId);
 		if (!preferred) return undefined;
-		const identity: OAuthAccountIdentity = { registrationId: preferred.registrationId, clientId: preferred.clientId, issuer: preferred.issuer, subject: preferred.subject };
+		const identity: OAuthAccountIdentity = {
+			registrationId: preferred.registrationId,
+			clientId: preferred.clientId,
+			issuer: preferred.issuer,
+			subject: preferred.subject,
+		};
 		if (typeof preferred.accountId === "string" && preferred.accountId.length > 0) {
 			identity.accountId = preferred.accountId;
 		}
@@ -527,7 +546,8 @@ export class OAuthAccounts implements OAuthApi {
 		if (typeof preferred.orgName === "string" && preferred.orgName.length > 0) {
 			identity.orgName = preferred.orgName;
 		}
-		if (!identity.registrationId && !identity.accountId && !identity.email && !identity.projectId && !identity.orgId) return undefined;
+		if (!identity.registrationId && !identity.accountId && !identity.email && !identity.projectId && !identity.orgId)
+			return undefined;
 		return identity;
 	}
 

@@ -18,9 +18,11 @@ import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
 
 const BUNDLED_CLIENT_ID = "da4edff2e6ebd2bc3208611e2768bc1c1dd7be791dc5ff26ca34ca9ee44f7d4b";
 const provider = getProviderDefinition("gitlab-duo");
-const login = (callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials | string> => {
+const login = async (callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials | string> => {
 	if (!provider?.login) throw new Error("gitlab-duo login is unavailable");
-	return provider.login(callbacks);
+	const result = await provider.login(callbacks);
+	if (typeof result !== "string" && "kind" in result) throw new Error("Expected GitLab OAuth credentials");
+	return result;
 };
 const refresh = (credentials: OAuthCredentials): Promise<OAuthCredentials> => {
 	if (!provider?.refreshToken) throw new Error("gitlab-duo refresh is unavailable");

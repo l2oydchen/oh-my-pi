@@ -945,8 +945,9 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 				}
 				if (req.method === "GET" && pathname === "/v1/credentials/disabled") {
 					const provider = url.searchParams.get("provider") ?? undefined;
-					const disabled = (await opts.storage.credentials.listDisabled(provider, req.signal))
-						.filter(entry => !authPolicyFor(entry.provider)?.localOnly);
+					const disabled = (await opts.storage.credentials.listDisabled(provider, req.signal)).filter(
+						entry => !authPolicyFor(entry.provider)?.localOnly,
+					);
 					const body: DisabledCredentialsResponse = { generatedAt: Date.now(), disabled };
 					return json(200, body);
 				}

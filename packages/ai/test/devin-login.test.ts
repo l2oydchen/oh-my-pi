@@ -31,7 +31,8 @@ describe("Devin CLI login", () => {
 
 		expect(credentials).not.toBeUndefined();
 		expect(typeof credentials).not.toBe("string");
-		if (!credentials || typeof credentials === "string") throw new Error("expected structured credentials");
+		if (!credentials || typeof credentials === "string" || "kind" in credentials)
+			throw new Error("expected structured credentials");
 		expect(credentials.access).toBe("devin-jwt");
 		expect(requestUrl).toBe("https://api.devin.ai/auth/cli/token");
 		expect(requestInit?.method).toBe("POST");
